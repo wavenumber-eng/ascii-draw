@@ -63,9 +63,19 @@
     <div id="canvas-container">
       <div id="canvas-wrapper">
         <canvas id="editor-canvas"></canvas>
+        <!-- Inline text editor overlay -->
+        <textarea id="inline-editor" spellcheck="false"></textarea>
       </div>
       <div id="page-tabs">
         <!-- Tabs populated by JS -->
+      </div>
+    </div>
+
+    <!-- Properties Panel -->
+    <div id="properties-panel">
+      <div class="panel-header">Properties</div>
+      <div id="properties-content">
+        <div class="property-empty">No selection</div>
       </div>
     </div>
   </div>
@@ -658,6 +668,33 @@
             return true;
           }
         }
+
+        // Type to edit: if single box selected and printable key pressed, start editing
+        if (state.selection.ids.length === 1 && event.key.length === 1 && !event.ctrlKey && !event.altKey) {
+          const page = state.project.pages.find(p => p.id === state.activePageId);
+          if (page) {
+            const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+            if (obj && obj.type === 'box' && context.startInlineEdit) {
+              context.startInlineEdit(obj, event.key);  // Pass initial character
+              return true;
+            }
+          }
+        }
+
+        return false;
+      }
+
+      onDoubleClick(event, context) {
+        const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+        const hit = this.hitTestObject(col, row, context);
+
+        if (hit && hit.type === 'box') {
+          // Start inline editing
+          if (context.startInlineEdit) {
+            context.startInlineEdit(hit);
+          }
+          return true;
+        }
         return false;
       }
 
@@ -1004,7 +1041,10 @@
               text: '',
               style: 'single',  // single, double, rounded
               shadow: false,
-              textAlign: 'center'
+              textJustify: 'center-center',  // vertical-horizontal: top/center/bottom - left/center/right
+              title: '',
+              titlePosition: 'top-left',  // top-left, top-center, top-right, bottom-left, bottom-center, bottom-right
+              titleMode: 'border'  // border (on line), inside, outside
             };
 
             context.history.execute(new CreateObjectCommand(state.activePageId, newBox));
@@ -1291,6 +1331,7 @@
         const styles = getComputedStyle(document.documentElement);
         const color = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
         const shadowColor = styles.getPropertyValue('--text-shadow').trim() || '#555555';
+        const titleColor = styles.getPropertyValue('--accent').trim() || '#007acc';
 
         // Draw shadow first if enabled
         if (shadow) {
@@ -1323,18 +1364,87 @@
         }
         this.drawChar(c.br, x + width - 1, y + height - 1, color);
 
-        // Draw text inside
-        if (obj.text) {
-          const textY = y + Math.floor(height / 2);
-          let textX = x + 1;
+        // Draw title if present
+        if (obj.title) {
+          const titlePos = obj.titlePosition || 'top-left';
+          const titleMode = obj.titleMode || 'border';
+          const [titleV, titleH] = titlePos.split('-');
+          const titleText = obj.title;
+          const maxTitleLen = width - 4;  // Leave room for borders and spacing
+          const displayTitle = titleText.length > maxTitleLen ? titleText.substring(0, maxTitleLen) : titleText;
 
-          if (obj.textAlign === 'center') {
-            textX = x + Math.floor((width - obj.text.length) / 2);
-          } else if (obj.textAlign === 'right') {
-            textX = x + width - obj.text.length - 1;
+          let titleX, titleY;
+
+          // Vertical position based on mode
+          if (titleV === 'top') {
+            if (titleMode === 'outside') {
+              titleY = y - 1;  // Above the box
+            } else if (titleMode === 'inside') {
+              titleY = y + 1;  // Inside, first row
+            } else {  // border
+              titleY = y;  // On the top border
+            }
+          } else if (titleV === 'bottom') {
+            if (titleMode === 'outside') {
+              titleY = y + height;  // Below the box
+            } else if (titleMode === 'inside') {
+              titleY = y + height - 2;  // Inside, last row
+            } else {  // border
+              titleY = y + height - 1;  // On the bottom border
+            }
           }
 
-          this.drawText(obj.text, textX, textY, color);
+          // Horizontal position
+          if (titleH === 'left') {
+            titleX = titleMode === 'inside' ? x + 1 : x + 2;
+          } else if (titleH === 'center') {
+            titleX = x + Math.floor((width - displayTitle.length) / 2);
+          } else if (titleH === 'right') {
+            titleX = titleMode === 'inside' ? x + width - displayTitle.length - 1 : x + width - displayTitle.length - 2;
+          }
+
+          // Draw title
+          this.drawText(displayTitle, titleX, titleY, titleColor);
+        }
+
+        // Draw multi-line text inside with 9-position justification
+        if (obj.text) {
+          const innerWidth = width - 2;
+          const innerHeight = height - 2;
+          const lines = obj.text.split('\n');
+
+          // Limit lines to fit in box
+          const maxLines = innerHeight;
+          const displayLines = lines.slice(0, maxLines);
+
+          const justify = obj.textJustify || 'center-center';
+          const [vAlign, hAlign] = justify.split('-');
+
+          // Calculate starting Y based on vertical alignment
+          let startY;
+          if (vAlign === 'top') {
+            startY = y + 1;
+          } else if (vAlign === 'bottom') {
+            startY = y + height - 1 - displayLines.length;
+          } else {  // center
+            startY = y + 1 + Math.floor((innerHeight - displayLines.length) / 2);
+          }
+
+          // Draw each line
+          displayLines.forEach((line, i) => {
+            const displayLine = line.length > innerWidth ? line.substring(0, innerWidth) : line;
+            let textX;
+
+            if (hAlign === 'left') {
+              textX = x + 1;
+            } else if (hAlign === 'right') {
+              textX = x + width - 1 - displayLine.length;
+            } else {  // center
+              textX = x + 1 + Math.floor((innerWidth - displayLine.length) / 2);
+            }
+
+            this.drawText(displayLine, textX, startY + i, color);
+          });
         }
       }
 
@@ -1353,7 +1463,7 @@
         }
       }
 
-      render(state, toolManager) {
+      render(state, toolManager, editContext = null) {
         this.clear();
 
         const page = state.project.pages.find(p => p.id === state.activePageId);
@@ -1364,11 +1474,72 @@
 
         // Draw all objects
         page.objects.forEach(obj => {
-          this.drawObject(obj);
+          // If this object is being edited, use preview text
+          if (editContext && editContext.objectId === obj.id && editContext.previewText !== null) {
+            const previewObj = { ...obj, text: editContext.previewText };
+            this.drawObject(previewObj);
+
+            // Draw blinking cursor if visible
+            if (editContext.cursorVisible) {
+              this.drawEditCursor(previewObj, editContext.cursorPosition);
+            }
+          } else {
+            this.drawObject(obj);
+          }
         });
 
         // Draw tool overlay
         toolManager.renderOverlay(this.ctx);
+      }
+
+      drawEditCursor(obj, cursorPos) {
+        if (!obj || obj.type !== 'box') return;
+
+        const innerWidth = obj.width - 2;
+        const innerHeight = obj.height - 2;
+        const lines = (obj.text || '').split('\n');
+        const displayLines = lines.slice(0, innerHeight);
+
+        const justify = obj.textJustify || 'center-center';
+        const [vAlign, hAlign] = justify.split('-');
+
+        // Calculate starting Y based on vertical alignment
+        let startY;
+        if (vAlign === 'top') {
+          startY = obj.y + 1;
+        } else if (vAlign === 'bottom') {
+          startY = obj.y + obj.height - 1 - displayLines.length;
+        } else {  // center
+          startY = obj.y + 1 + Math.floor((innerHeight - displayLines.length) / 2);
+        }
+
+        // Get the line where cursor is
+        const lineIndex = Math.min(cursorPos.line, displayLines.length);
+        const lineText = displayLines[lineIndex] || '';
+        const cursorCol = Math.min(cursorPos.col, innerWidth);
+
+        // Calculate X based on horizontal alignment
+        let lineStartX;
+        if (hAlign === 'left') {
+          lineStartX = obj.x + 1;
+        } else if (hAlign === 'right') {
+          lineStartX = obj.x + obj.width - 1 - lineText.length;
+        } else {  // center
+          lineStartX = obj.x + 1 + Math.floor((innerWidth - lineText.length) / 2);
+        }
+
+        const cursorX = lineStartX + cursorCol;
+        const cursorY = startY + lineIndex;
+
+        // Draw cursor as a vertical bar or block
+        const styles = getComputedStyle(document.documentElement);
+        const cursorColor = styles.getPropertyValue('--accent').trim() || '#007acc';
+
+        const px = cursorX * this.grid.charWidth;
+        const py = cursorY * this.grid.charHeight;
+
+        this.ctx.fillStyle = cursorColor;
+        this.ctx.fillRect(px, py + 2, 2, this.grid.charHeight - 4);
       }
     }
 
@@ -1484,7 +1655,10 @@
         this.setupEventListeners();
 
         // Subscribe to state changes
-        this.history.subscribe(() => this.render());
+        this.history.subscribe(() => {
+          this.render();
+          this.updateUI();
+        });
 
         // Initial render
         this.render();
@@ -1533,7 +1707,8 @@
         this.toolManager.setContext({
           canvas: this.canvas,
           grid: this.grid,
-          history: this.history
+          history: this.history,
+          startInlineEdit: (obj) => this.startInlineEdit(obj)
         });
 
         // Activate default tool
@@ -1565,8 +1740,14 @@
         hk.register('ctrl+s', () => this.saveProject());
         hk.register('ctrl+e', () => this.exportASCII());
 
-        // Escape
+        // Escape - exit edit mode or clear selection
         hk.register('escape', () => {
+          // If editing, cancel edit mode
+          if (this.editingObjectId) {
+            this.cancelInlineEdit();
+            return;
+          }
+          // Otherwise clear selection and go to select tool
           this.history.updateState(s => ({
             ...s,
             selection: { ids: [], handles: null }
@@ -1602,9 +1783,649 @@
 
         // Window resize
         window.addEventListener('resize', () => this.render());
+
+        // Inline editor events
+        this.inlineEditor = document.getElementById('inline-editor');
+        this.editPreviewText = null;
+        this.cursorVisible = true;
+        this.cursorPosition = { line: 0, col: 0 };
+
+        this.inlineEditor.addEventListener('blur', () => this.finishInlineEdit());
+        this.inlineEditor.addEventListener('keydown', (e) => {
+          // Stop propagation so hotkeys don't interfere
+          e.stopPropagation();
+
+          if (e.key === 'Escape') {
+            this.cancelInlineEdit();
+          } else if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            this.finishInlineEdit();
+          }
+        });
+
+        // Real-time preview while typing
+        this.inlineEditor.addEventListener('input', () => {
+          this.editPreviewText = this.inlineEditor.value;
+          this.updateCursorPosition();
+          this.render();
+        });
+
+        // Track cursor position for blinking cursor
+        this.inlineEditor.addEventListener('selectionchange', () => this.updateCursorPosition());
+        this.inlineEditor.addEventListener('click', () => this.updateCursorPosition());
+        this.inlineEditor.addEventListener('keyup', () => this.updateCursorPosition());
+
+        // Cursor blink interval
+        this.cursorBlinkInterval = setInterval(() => {
+          if (this.editingObjectId) {
+            this.cursorVisible = !this.cursorVisible;
+            this.render();
+          }
+        }, 530);
+      }
+
+      updateCursorPosition() {
+        if (!this.editingObjectId) return;
+
+        const editor = this.inlineEditor;
+        const text = editor.value;
+        const selStart = editor.selectionStart;
+
+        // Calculate line and column from selection position
+        const textBefore = text.substring(0, selStart);
+        const lines = textBefore.split('\n');
+        this.cursorPosition = {
+          line: lines.length - 1,
+          col: lines[lines.length - 1].length
+        };
+      }
+
+      // ============================================================
+      // INLINE TEXT EDITING
+      // ============================================================
+
+      startInlineEdit(obj, initialChar = null) {
+        if (!obj || obj.type !== 'box') return;
+
+        // Get fresh object reference from state
+        const state = this.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        const freshObj = page.objects.find(o => o.id === obj.id);
+        if (!freshObj) return;
+
+        this.editingObjectId = freshObj.id;
+        this.cursorVisible = true;  // Start with cursor visible
+
+        const editor = this.inlineEditor;
+
+        // Hide the inline editor visually but keep it functional for input
+        // We'll render the text directly on the canvas instead
+        editor.style.left = '-9999px';
+        editor.style.top = '-9999px';
+        editor.style.width = '200px';
+        editor.style.height = '100px';
+        editor.style.display = 'block';
+        editor.style.opacity = '0';
+
+        // Set current text or start with initial character
+        if (initialChar !== null) {
+          editor.value = initialChar;
+          this.editPreviewText = initialChar;
+          editor.focus();
+          editor.setSelectionRange(editor.value.length, editor.value.length);
+        } else {
+          editor.value = freshObj.text || '';
+          this.editPreviewText = freshObj.text || '';
+          editor.focus();
+          editor.select();
+        }
+
+        this.updateCursorPosition();
+        this.render();
+      }
+
+      finishInlineEdit() {
+        if (!this.editingObjectId) return;
+
+        const state = this.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        const obj = page.objects.find(o => o.id === this.editingObjectId);
+        if (!obj) return;
+
+        const editor = this.inlineEditor;
+        const newText = editor.value;
+
+        // Only commit if text changed
+        if (newText !== (obj.text || '')) {
+          this.history.execute(new ModifyObjectCommand(
+            state.activePageId,
+            obj.id,
+            { text: obj.text || '' },
+            { text: newText }
+          ));
+        }
+
+        editor.style.display = 'none';
+        editor.style.opacity = '1';
+        this.editingObjectId = null;
+        this.editPreviewText = null;
+        this.render();
+        this.updatePropertiesPanel();
+      }
+
+      cancelInlineEdit() {
+        this.inlineEditor.style.display = 'none';
+        this.inlineEditor.style.opacity = '1';
+        this.editingObjectId = null;
+        this.editPreviewText = null;
+        this.render();
+      }
+
+      // ============================================================
+      // PROPERTIES PANEL
+      // ============================================================
+
+      updatePropertiesPanel() {
+        const state = this.history.getState();
+        const content = document.getElementById('properties-content');
+
+        if (state.selection.ids.length === 0) {
+          content.innerHTML = '<div class="property-empty">No selection</div>';
+          return;
+        }
+
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        // Get all selected objects
+        const selectedObjects = state.selection.ids
+          .map(id => page.objects.find(o => o.id === id))
+          .filter(obj => obj != null);
+
+        if (selectedObjects.length === 0) {
+          content.innerHTML = '<div class="property-empty">No selection</div>';
+          return;
+        }
+
+        if (selectedObjects.length === 1) {
+          // Single selection - show full properties
+          const obj = selectedObjects[0];
+          if (obj.type === 'box') {
+            this.renderBoxProperties(obj);
+          } else {
+            content.innerHTML = `<div class="property-empty">Unknown object type</div>`;
+          }
+        } else {
+          // Multi-selection - show common properties
+          this.renderMultiSelectProperties(selectedObjects);
+        }
+      }
+
+      // Get common property values across multiple objects
+      getCommonPropertyValue(objects, prop) {
+        if (objects.length === 0) return { value: null, mixed: false };
+
+        const firstValue = objects[0][prop];
+        const allSame = objects.every(obj => {
+          const val = obj[prop];
+          // Handle comparison for different types
+          if (val === firstValue) return true;
+          if (val === undefined && firstValue === undefined) return true;
+          if (val === '' && firstValue === '') return true;
+          return false;
+        });
+
+        return {
+          value: allSame ? firstValue : null,
+          mixed: !allSame
+        };
+      }
+
+      renderMultiSelectProperties(objects) {
+        const content = document.getElementById('properties-content');
+        const objectIds = objects.map(o => o.id);
+
+        // Get common property values
+        const props = {
+          x: this.getCommonPropertyValue(objects, 'x'),
+          y: this.getCommonPropertyValue(objects, 'y'),
+          width: this.getCommonPropertyValue(objects, 'width'),
+          height: this.getCommonPropertyValue(objects, 'height'),
+          style: this.getCommonPropertyValue(objects, 'style'),
+          shadow: this.getCommonPropertyValue(objects, 'shadow'),
+          title: this.getCommonPropertyValue(objects, 'title'),
+          titlePosition: this.getCommonPropertyValue(objects, 'titlePosition'),
+          titleMode: this.getCommonPropertyValue(objects, 'titleMode'),
+          textJustify: this.getCommonPropertyValue(objects, 'textJustify'),
+          text: this.getCommonPropertyValue(objects, 'text')
+        };
+
+        // Helper to render input value
+        const inputValue = (prop) => prop.mixed ? '' : (prop.value ?? '');
+        const inputPlaceholder = (prop, defaultPlaceholder = '') => prop.mixed ? '...' : defaultPlaceholder;
+        const selectValue = (prop, defaultVal) => prop.mixed ? '' : (prop.value ?? defaultVal);
+        const checkboxState = (prop) => {
+          if (prop.mixed) return { checked: false, indeterminate: true };
+          return { checked: !!prop.value, indeterminate: false };
+        };
+
+        const shadowState = checkboxState(props.shadow);
+
+        content.innerHTML = `
+          <div class="property-group">
+            <div class="property-group-title">${objects.length} Objects Selected</div>
+          </div>
+
+          <div class="property-group">
+            <div class="property-group-title">Position</div>
+            <div class="property-row">
+              <span class="property-label">X</span>
+              <input type="number" class="property-input ${props.x.mixed ? 'mixed' : ''}" id="prop-x"
+                value="${inputValue(props.x)}" placeholder="${inputPlaceholder(props.x)}">
+            </div>
+            <div class="property-row">
+              <span class="property-label">Y</span>
+              <input type="number" class="property-input ${props.y.mixed ? 'mixed' : ''}" id="prop-y"
+                value="${inputValue(props.y)}" placeholder="${inputPlaceholder(props.y)}">
+            </div>
+          </div>
+
+          <div class="property-group">
+            <div class="property-group-title">Size</div>
+            <div class="property-row">
+              <span class="property-label">Width</span>
+              <input type="number" class="property-input ${props.width.mixed ? 'mixed' : ''}" id="prop-width"
+                value="${inputValue(props.width)}" placeholder="${inputPlaceholder(props.width)}" min="3">
+            </div>
+            <div class="property-row">
+              <span class="property-label">Height</span>
+              <input type="number" class="property-input ${props.height.mixed ? 'mixed' : ''}" id="prop-height"
+                value="${inputValue(props.height)}" placeholder="${inputPlaceholder(props.height)}" min="3">
+            </div>
+          </div>
+
+          <div class="property-group">
+            <div class="property-group-title">Style</div>
+            <div class="property-row">
+              <span class="property-label">Border</span>
+              <select class="property-select ${props.style.mixed ? 'mixed' : ''}" id="prop-style">
+                ${props.style.mixed ? '<option value="" selected>...</option>' : ''}
+                <option value="single" ${selectValue(props.style, 'single') === 'single' ? 'selected' : ''}>Single</option>
+                <option value="double" ${selectValue(props.style, '') === 'double' ? 'selected' : ''}>Double</option>
+                <option value="rounded" ${selectValue(props.style, '') === 'rounded' ? 'selected' : ''}>Rounded</option>
+              </select>
+            </div>
+            <div class="property-row">
+              <label class="property-checkbox">
+                <input type="checkbox" id="prop-shadow" ${shadowState.checked ? 'checked' : ''}>
+                <span>Drop Shadow ${props.shadow.mixed ? '(mixed)' : ''}</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="property-group">
+            <div class="property-group-title">Title</div>
+            <div class="property-row">
+              <input type="text" class="property-input ${props.title.mixed ? 'mixed' : ''}" id="prop-title"
+                value="${inputValue(props.title)}" placeholder="${inputPlaceholder(props.title, 'Box title')}">
+            </div>
+            <div class="property-row">
+              <span class="property-label">Position</span>
+              <select class="property-select ${props.titlePosition.mixed ? 'mixed' : ''}" id="prop-titlePosition">
+                ${props.titlePosition.mixed ? '<option value="" selected>...</option>' : ''}
+                <option value="top-left" ${selectValue(props.titlePosition, 'top-left') === 'top-left' ? 'selected' : ''}>Top Left</option>
+                <option value="top-center" ${selectValue(props.titlePosition, '') === 'top-center' ? 'selected' : ''}>Top Center</option>
+                <option value="top-right" ${selectValue(props.titlePosition, '') === 'top-right' ? 'selected' : ''}>Top Right</option>
+                <option value="bottom-left" ${selectValue(props.titlePosition, '') === 'bottom-left' ? 'selected' : ''}>Bottom Left</option>
+                <option value="bottom-center" ${selectValue(props.titlePosition, '') === 'bottom-center' ? 'selected' : ''}>Bottom Center</option>
+                <option value="bottom-right" ${selectValue(props.titlePosition, '') === 'bottom-right' ? 'selected' : ''}>Bottom Right</option>
+              </select>
+            </div>
+            <div class="property-row">
+              <span class="property-label">Mode</span>
+              <select class="property-select ${props.titleMode.mixed ? 'mixed' : ''}" id="prop-titleMode">
+                ${props.titleMode.mixed ? '<option value="" selected>...</option>' : ''}
+                <option value="border" ${selectValue(props.titleMode, 'border') === 'border' ? 'selected' : ''}>On Border</option>
+                <option value="inside" ${selectValue(props.titleMode, '') === 'inside' ? 'selected' : ''}>Inside</option>
+                <option value="outside" ${selectValue(props.titleMode, '') === 'outside' ? 'selected' : ''}>Outside</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="property-group">
+            <div class="property-group-title">Text Content</div>
+            <div class="property-row">
+              <span class="property-label">Justify</span>
+            </div>
+            <div class="justify-grid" id="justify-grid">
+              <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'top-left' ? 'active' : ''}" data-justify="top-left" title="Top Left">&#x2196;</button>
+              <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'top-center' ? 'active' : ''}" data-justify="top-center" title="Top Center">&#x2191;</button>
+              <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'top-right' ? 'active' : ''}" data-justify="top-right" title="Top Right">&#x2197;</button>
+              <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'center-left' ? 'active' : ''}" data-justify="center-left" title="Center Left">&#x2190;</button>
+              <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'center-center' ? 'active' : ''}" data-justify="center-center" title="Center">&#x25CF;</button>
+              <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'center-right' ? 'active' : ''}" data-justify="center-right" title="Center Right">&#x2192;</button>
+              <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'bottom-left' ? 'active' : ''}" data-justify="bottom-left" title="Bottom Left">&#x2199;</button>
+              <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'bottom-center' ? 'active' : ''}" data-justify="bottom-center" title="Bottom Center">&#x2193;</button>
+              <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'bottom-right' ? 'active' : ''}" data-justify="bottom-right" title="Bottom Right">&#x2198;</button>
+            </div>
+            <textarea class="property-textarea ${props.text.mixed ? 'mixed' : ''}" id="prop-text"
+              placeholder="${inputPlaceholder(props.text, 'Text content')}">${inputValue(props.text)}</textarea>
+          </div>
+        `;
+
+        // Set indeterminate state for checkbox after DOM is created
+        const shadowCheck = document.getElementById('prop-shadow');
+        if (shadowCheck && props.shadow.mixed) {
+          shadowCheck.indeterminate = true;
+        }
+
+        // Wire up event listeners for multi-select
+        this.wireMultiSelectListeners(objectIds);
+      }
+
+      wireMultiSelectListeners(objectIds) {
+        // Position/Size inputs
+        ['x', 'y', 'width', 'height'].forEach(prop => {
+          const input = document.getElementById(`prop-${prop}`);
+          if (input) {
+            input.addEventListener('change', () => {
+              const value = input.value;
+              if (value === '') return;  // Don't update if empty (mixed state)
+              let numValue = parseInt(value, 10);
+              if (prop === 'width' || prop === 'height') {
+                numValue = Math.max(3, numValue);
+              }
+              this.updateMultipleObjectsProperty(objectIds, prop, numValue);
+            });
+          }
+        });
+
+        // Style select
+        const styleSelect = document.getElementById('prop-style');
+        if (styleSelect) {
+          styleSelect.addEventListener('change', () => {
+            if (styleSelect.value === '') return;  // Mixed placeholder
+            this.updateMultipleObjectsProperty(objectIds, 'style', styleSelect.value);
+          });
+        }
+
+        // Shadow checkbox
+        const shadowCheck = document.getElementById('prop-shadow');
+        if (shadowCheck) {
+          shadowCheck.addEventListener('change', () => {
+            this.updateMultipleObjectsProperty(objectIds, 'shadow', shadowCheck.checked);
+          });
+        }
+
+        // Title input
+        const titleInput = document.getElementById('prop-title');
+        if (titleInput) {
+          titleInput.addEventListener('change', () => {
+            this.updateMultipleObjectsProperty(objectIds, 'title', titleInput.value);
+          });
+        }
+
+        // Title position select
+        const titlePosSelect = document.getElementById('prop-titlePosition');
+        if (titlePosSelect) {
+          titlePosSelect.addEventListener('change', () => {
+            if (titlePosSelect.value === '') return;
+            this.updateMultipleObjectsProperty(objectIds, 'titlePosition', titlePosSelect.value);
+          });
+        }
+
+        // Title mode select
+        const titleModeSelect = document.getElementById('prop-titleMode');
+        if (titleModeSelect) {
+          titleModeSelect.addEventListener('change', () => {
+            if (titleModeSelect.value === '') return;
+            this.updateMultipleObjectsProperty(objectIds, 'titleMode', titleModeSelect.value);
+          });
+        }
+
+        // Text justification grid buttons
+        document.querySelectorAll('[data-justify]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            this.updateMultipleObjectsProperty(objectIds, 'textJustify', btn.dataset.justify);
+          });
+        });
+
+        // Text textarea
+        const textArea = document.getElementById('prop-text');
+        if (textArea) {
+          textArea.addEventListener('change', () => {
+            this.updateMultipleObjectsProperty(objectIds, 'text', textArea.value);
+          });
+        }
+      }
+
+      updateMultipleObjectsProperty(objectIds, property, value) {
+        const state = this.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        // Create modify commands for all objects
+        objectIds.forEach(objectId => {
+          const obj = page.objects.find(o => o.id === objectId);
+          if (!obj) return;
+
+          const oldValue = obj[property];
+          if (oldValue === value) return;  // Skip if no change
+
+          this.history.execute(new ModifyObjectCommand(
+            state.activePageId,
+            objectId,
+            { [property]: oldValue },
+            { [property]: value }
+          ));
+        });
+
+        this.updatePropertiesPanel();
+      }
+
+      renderBoxProperties(obj) {
+        const content = document.getElementById('properties-content');
+        const justify = obj.textJustify || 'center-center';
+        const titlePos = obj.titlePosition || 'top-left';
+        const titleMode = obj.titleMode || 'border';
+
+        content.innerHTML = `
+          <div class="property-group">
+            <div class="property-group-title">Position</div>
+            <div class="property-row">
+              <span class="property-label">X</span>
+              <input type="number" class="property-input" id="prop-x" value="${obj.x}">
+            </div>
+            <div class="property-row">
+              <span class="property-label">Y</span>
+              <input type="number" class="property-input" id="prop-y" value="${obj.y}">
+            </div>
+          </div>
+
+          <div class="property-group">
+            <div class="property-group-title">Size</div>
+            <div class="property-row">
+              <span class="property-label">Width</span>
+              <input type="number" class="property-input" id="prop-width" value="${obj.width}" min="3">
+            </div>
+            <div class="property-row">
+              <span class="property-label">Height</span>
+              <input type="number" class="property-input" id="prop-height" value="${obj.height}" min="3">
+            </div>
+          </div>
+
+          <div class="property-group">
+            <div class="property-group-title">Style</div>
+            <div class="property-row">
+              <span class="property-label">Border</span>
+              <select class="property-select" id="prop-style">
+                <option value="single" ${obj.style === 'single' ? 'selected' : ''}>Single</option>
+                <option value="double" ${obj.style === 'double' ? 'selected' : ''}>Double</option>
+                <option value="rounded" ${obj.style === 'rounded' ? 'selected' : ''}>Rounded</option>
+              </select>
+            </div>
+            <div class="property-row">
+              <label class="property-checkbox">
+                <input type="checkbox" id="prop-shadow" ${obj.shadow ? 'checked' : ''}>
+                <span>Drop Shadow</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="property-group">
+            <div class="property-group-title">Title</div>
+            <div class="property-row">
+              <input type="text" class="property-input" id="prop-title" value="${obj.title || ''}" placeholder="Box title">
+            </div>
+            <div class="property-row">
+              <span class="property-label">Position</span>
+              <select class="property-select" id="prop-titlePosition">
+                <option value="top-left" ${titlePos === 'top-left' ? 'selected' : ''}>Top Left</option>
+                <option value="top-center" ${titlePos === 'top-center' ? 'selected' : ''}>Top Center</option>
+                <option value="top-right" ${titlePos === 'top-right' ? 'selected' : ''}>Top Right</option>
+                <option value="bottom-left" ${titlePos === 'bottom-left' ? 'selected' : ''}>Bottom Left</option>
+                <option value="bottom-center" ${titlePos === 'bottom-center' ? 'selected' : ''}>Bottom Center</option>
+                <option value="bottom-right" ${titlePos === 'bottom-right' ? 'selected' : ''}>Bottom Right</option>
+              </select>
+            </div>
+            <div class="property-row">
+              <span class="property-label">Mode</span>
+              <select class="property-select" id="prop-titleMode">
+                <option value="border" ${titleMode === 'border' ? 'selected' : ''}>On Border</option>
+                <option value="inside" ${titleMode === 'inside' ? 'selected' : ''}>Inside</option>
+                <option value="outside" ${titleMode === 'outside' ? 'selected' : ''}>Outside</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="property-group">
+            <div class="property-group-title">Text Content</div>
+            <div class="property-row">
+              <span class="property-label">Justify</span>
+            </div>
+            <div class="justify-grid" id="justify-grid">
+              <button class="justify-btn ${justify === 'top-left' ? 'active' : ''}" data-justify="top-left" title="Top Left">&#x2196;</button>
+              <button class="justify-btn ${justify === 'top-center' ? 'active' : ''}" data-justify="top-center" title="Top Center">&#x2191;</button>
+              <button class="justify-btn ${justify === 'top-right' ? 'active' : ''}" data-justify="top-right" title="Top Right">&#x2197;</button>
+              <button class="justify-btn ${justify === 'center-left' ? 'active' : ''}" data-justify="center-left" title="Center Left">&#x2190;</button>
+              <button class="justify-btn ${justify === 'center-center' ? 'active' : ''}" data-justify="center-center" title="Center">&#x25CF;</button>
+              <button class="justify-btn ${justify === 'center-right' ? 'active' : ''}" data-justify="center-right" title="Center Right">&#x2192;</button>
+              <button class="justify-btn ${justify === 'bottom-left' ? 'active' : ''}" data-justify="bottom-left" title="Bottom Left">&#x2199;</button>
+              <button class="justify-btn ${justify === 'bottom-center' ? 'active' : ''}" data-justify="bottom-center" title="Bottom Center">&#x2193;</button>
+              <button class="justify-btn ${justify === 'bottom-right' ? 'active' : ''}" data-justify="bottom-right" title="Bottom Right">&#x2198;</button>
+            </div>
+            <textarea class="property-textarea" id="prop-text" placeholder="Type when selected or double-click to edit">${obj.text || ''}</textarea>
+          </div>
+        `;
+
+        // Wire up event listeners
+        this.wirePropertyListeners(obj);
+      }
+
+      wirePropertyListeners(obj) {
+        const state = this.history.getState();
+
+        // Position/Size inputs
+        ['x', 'y', 'width', 'height'].forEach(prop => {
+          const input = document.getElementById(`prop-${prop}`);
+          if (input) {
+            input.addEventListener('change', () => {
+              let value = parseInt(input.value, 10);
+              if (prop === 'width' || prop === 'height') {
+                value = Math.max(3, value);  // Minimum size
+              }
+              this.updateObjectProperty(obj.id, prop, value);
+            });
+          }
+        });
+
+        // Style select
+        const styleSelect = document.getElementById('prop-style');
+        if (styleSelect) {
+          styleSelect.addEventListener('change', () => {
+            this.updateObjectProperty(obj.id, 'style', styleSelect.value);
+          });
+        }
+
+        // Shadow checkbox
+        const shadowCheck = document.getElementById('prop-shadow');
+        if (shadowCheck) {
+          shadowCheck.addEventListener('change', () => {
+            this.updateObjectProperty(obj.id, 'shadow', shadowCheck.checked);
+          });
+        }
+
+        // Title input
+        const titleInput = document.getElementById('prop-title');
+        if (titleInput) {
+          titleInput.addEventListener('change', () => {
+            this.updateObjectProperty(obj.id, 'title', titleInput.value);
+          });
+        }
+
+        // Title position select
+        const titlePosSelect = document.getElementById('prop-titlePosition');
+        if (titlePosSelect) {
+          titlePosSelect.addEventListener('change', () => {
+            this.updateObjectProperty(obj.id, 'titlePosition', titlePosSelect.value);
+          });
+        }
+
+        // Title mode select
+        const titleModeSelect = document.getElementById('prop-titleMode');
+        if (titleModeSelect) {
+          titleModeSelect.addEventListener('change', () => {
+            this.updateObjectProperty(obj.id, 'titleMode', titleModeSelect.value);
+          });
+        }
+
+        // Text justification grid buttons
+        document.querySelectorAll('[data-justify]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            this.updateObjectProperty(obj.id, 'textJustify', btn.dataset.justify);
+          });
+        });
+
+        // Text textarea
+        const textArea = document.getElementById('prop-text');
+        if (textArea) {
+          textArea.addEventListener('change', () => {
+            this.updateObjectProperty(obj.id, 'text', textArea.value);
+          });
+        }
+      }
+
+      updateObjectProperty(objectId, property, value) {
+        const state = this.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        const obj = page.objects.find(o => o.id === objectId);
+        if (!obj) return;
+
+        const oldValue = obj[property];
+        if (oldValue === value) return;
+
+        this.history.execute(new ModifyObjectCommand(
+          state.activePageId,
+          objectId,
+          { [property]: oldValue },
+          { [property]: value }
+        ));
+
+        this.updatePropertiesPanel();
       }
 
       handleMouseDown(e) {
+        // If editing, finish edit first before processing mouse event
+        if (this.editingObjectId) {
+          this.finishInlineEdit();
+        }
+
         const rect = this.canvas.getBoundingClientRect();
         const event = {
           canvasX: e.clientX - rect.left,
@@ -1669,6 +2490,17 @@
       }
 
       handleKeyDown(e) {
+        // Don't intercept keys when inline editor is active
+        if (this.editingObjectId && document.activeElement === this.inlineEditor) {
+          return;
+        }
+
+        // Don't intercept when focused on input/textarea in properties panel
+        if (document.activeElement.tagName === 'INPUT' ||
+            document.activeElement.tagName === 'TEXTAREA') {
+          return;
+        }
+
         // First try hotkey manager
         if (this.hotkeyManager.handleKeyDown(e)) {
           this.render();
@@ -1704,7 +2536,19 @@
 
       render() {
         const state = this.history.getState();
-        this.renderer.render(state, this.toolManager);
+
+        // Build edit context if currently editing
+        let editContext = null;
+        if (this.editingObjectId) {
+          editContext = {
+            objectId: this.editingObjectId,
+            previewText: this.editPreviewText,
+            cursorVisible: this.cursorVisible,
+            cursorPosition: this.cursorPosition
+          };
+        }
+
+        this.renderer.render(state, this.toolManager, editContext);
       }
 
       updateUI() {
@@ -1724,6 +2568,9 @@
         const pageIndex = state.project.pages.findIndex(p => p.id === state.activePageId);
         document.getElementById('status-page').textContent =
           `Page: ${pageIndex + 1}/${state.project.pages.length}`;
+
+        // Update properties panel
+        this.updatePropertiesPanel();
       }
 
       renderPageTabs() {
@@ -1880,7 +2727,7 @@
       }
 
       renderBoxToBuffer(buffer, obj) {
-        const { x, y, width, height, style, text } = obj;
+        const { x, y, width, height, style, text, shadow } = obj;
 
         const chars = {
           single: { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' },
@@ -1896,6 +2743,17 @@
             buffer[row][col] = char;
           }
         };
+
+        // Draw shadow first if enabled
+        if (shadow) {
+          for (let row = 1; row <= height; row++) {
+            setChar(x + width, y + row, '░');
+          }
+          for (let col = 1; col < width; col++) {
+            setChar(x + col, y + height, '░');
+          }
+          setChar(x + width, y + height, '░');
+        }
 
         // Top border
         setChar(x, y, c.tl);
@@ -1917,20 +2775,85 @@
         }
         setChar(x + width - 1, y + height - 1, c.br);
 
-        // Text inside
+        // Title
+        if (obj.title) {
+          const titlePos = obj.titlePosition || 'top-left';
+          const titleMode = obj.titleMode || 'border';
+          const [titleV, titleH] = titlePos.split('-');
+          const maxTitleLen = width - 4;
+          const displayTitle = obj.title.length > maxTitleLen ? obj.title.substring(0, maxTitleLen) : obj.title;
+
+          let titleX, titleY;
+
+          // Vertical position based on mode
+          if (titleV === 'top') {
+            if (titleMode === 'outside') {
+              titleY = y - 1;
+            } else if (titleMode === 'inside') {
+              titleY = y + 1;
+            } else {
+              titleY = y;
+            }
+          } else if (titleV === 'bottom') {
+            if (titleMode === 'outside') {
+              titleY = y + height;
+            } else if (titleMode === 'inside') {
+              titleY = y + height - 2;
+            } else {
+              titleY = y + height - 1;
+            }
+          }
+
+          // Horizontal position
+          if (titleH === 'left') {
+            titleX = titleMode === 'inside' ? x + 1 : x + 2;
+          } else if (titleH === 'center') {
+            titleX = x + Math.floor((width - displayTitle.length) / 2);
+          } else if (titleH === 'right') {
+            titleX = titleMode === 'inside' ? x + width - displayTitle.length - 1 : x + width - displayTitle.length - 2;
+          }
+
+          for (let i = 0; i < displayTitle.length; i++) {
+            setChar(titleX + i, titleY, displayTitle[i]);
+          }
+        }
+
+        // Multi-line text with justification
         if (text) {
-          const textY = y + Math.floor(height / 2);
-          let textX = x + 1;
+          const innerWidth = width - 2;
+          const innerHeight = height - 2;
+          const lines = text.split('\n');
+          const maxLines = innerHeight;
+          const displayLines = lines.slice(0, maxLines);
 
-          if (obj.textAlign === 'center') {
-            textX = x + Math.floor((width - text.length) / 2);
-          } else if (obj.textAlign === 'right') {
-            textX = x + width - text.length - 1;
+          const justify = obj.textJustify || 'center-center';
+          const [vAlign, hAlign] = justify.split('-');
+
+          let startY;
+          if (vAlign === 'top') {
+            startY = y + 1;
+          } else if (vAlign === 'bottom') {
+            startY = y + height - 1 - displayLines.length;
+          } else {
+            startY = y + 1 + Math.floor((innerHeight - displayLines.length) / 2);
           }
 
-          for (let i = 0; i < text.length && textX + i < x + width - 1; i++) {
-            setChar(textX + i, textY, text[i]);
-          }
+          displayLines.forEach((line, i) => {
+            const displayLine = line.length > innerWidth ? line.substring(0, innerWidth) : line;
+            let textX;
+
+            if (hAlign === 'left') {
+              textX = x + 1;
+            } else if (hAlign === 'right') {
+              textX = x + width - 1 - displayLine.length;
+            } else {
+              textX = x + 1 + Math.floor((innerWidth - displayLine.length) / 2);
+            }
+
+            for (let j = 0; j < displayLine.length; j++) {
+              setChar(textX + j, startY + i, displayLine[j]);
+            }
+          });
         }
       }
     }
