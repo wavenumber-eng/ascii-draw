@@ -182,6 +182,25 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
   - Future: export to EDA formats
 - Lightweight schematic capture, not full EDA - but the data is there
 
+## Selection Behavior
+
+### Marquee Selection (Rubber Band)
+- **Left-to-right drag**: Select objects fully enclosed in box
+- **Right-to-left drag**: Select any objects intersecting the box
+- Visual distinction: solid vs dashed selection rectangle
+
+### Single vs Multi-Select
+- **Single select**: Click on object
+- **Multi-select**:
+  - Ctrl+click to add/remove from selection
+  - Ctrl+drag marquee to add to existing selection
+- **Deselect**: Escape key or click empty space
+
+### Operations by Selection Type
+- **Single select**: Move, resize (handles), edit properties, delete
+- **Multi-select**: Move (all together), delete, align, copy/paste
+- Resize handles only shown for single selection
+
 ## Design Philosophy
 
 - **Napkin to netlist**: Support the full spectrum

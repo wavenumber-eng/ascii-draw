@@ -397,114 +397,241 @@
     // SELECT TOOL
     // ============================================================
 
+    // Interaction modes for SelectTool
+    const SelectMode = {
+      NONE: 'none',
+      DRAGGING: 'dragging',           // Moving selected object(s)
+      MARQUEE: 'marquee',             // Drawing selection rectangle
+      RESIZING: 'resizing'            // Resizing single object
+    };
+
+    // Resize handle positions
+    const HandlePosition = {
+      TOP_LEFT: 'tl',
+      TOP_RIGHT: 'tr',
+      BOTTOM_LEFT: 'bl',
+      BOTTOM_RIGHT: 'br'
+    };
+
     class SelectTool extends Tool {
       constructor() {
         super('select');
         this.cursor = 'default';
-        this.dragging = false;
+        this.mode = SelectMode.NONE;
         this.dragStart = null;
-        this.draggedObjectId = null;
-        this.dragOffset = null;
-        this.originalPos = null;
+        this.dragCurrent = null;
+        this.draggedIds = [];
+        this.originalPositions = {};
+        this.activeHandle = null;
+        this.resizeOriginal = null;
+        this.addToSelection = false;  // Ctrl key held
       }
 
       activate(context) {
-        this.dragging = false;
-        this.draggedObjectId = null;
+        this.resetState();
+        context.canvas.style.cursor = this.cursor;
+      }
+
+      deactivate() {
+        this.resetState();
+      }
+
+      resetState() {
+        this.mode = SelectMode.NONE;
+        this.dragStart = null;
+        this.dragCurrent = null;
+        this.draggedIds = [];
+        this.originalPositions = {};
+        this.activeHandle = null;
+        this.resizeOriginal = null;
+        this.addToSelection = false;
       }
 
       onMouseDown(event, context) {
         const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-        const hit = this.hitTest(col, row, context);
+        const state = context.history.getState();
+        this.addToSelection = event.ctrlKey;
+        this.dragStart = { col, row, pixelX: event.canvasX, pixelY: event.canvasY };
+        this.dragCurrent = { col, row };
+
+        // Check for resize handle hit (single selection only)
+        if (state.selection.ids.length === 1) {
+          const handle = this.hitTestHandle(event.canvasX, event.canvasY, context);
+          if (handle) {
+            this.mode = SelectMode.RESIZING;
+            this.activeHandle = handle.position;
+            this.resizeOriginal = { ...handle.obj };
+            return true;
+          }
+        }
+
+        // Check for object hit
+        const hit = this.hitTestObject(col, row, context);
 
         if (hit) {
-          // Select and prepare to drag
-          context.history.updateState(state => ({
-            ...state,
-            selection: { ids: [hit.id], handles: null }
-          }));
-          this.dragging = true;
-          this.draggedObjectId = hit.id;
-          this.dragStart = { col, row };
-          this.originalPos = { x: hit.x, y: hit.y };
-          this.dragOffset = { col: col - hit.x, row: row - hit.y };
+          const isAlreadySelected = state.selection.ids.includes(hit.id);
+
+          if (event.ctrlKey) {
+            // Ctrl+click: toggle selection
+            if (isAlreadySelected) {
+              context.history.updateState(s => ({
+                ...s,
+                selection: {
+                  ids: s.selection.ids.filter(id => id !== hit.id),
+                  handles: null
+                }
+              }));
+            } else {
+              context.history.updateState(s => ({
+                ...s,
+                selection: {
+                  ids: [...s.selection.ids, hit.id],
+                  handles: null
+                }
+              }));
+            }
+          } else {
+            // Regular click: select this object (or keep multi-selection if clicking selected)
+            if (!isAlreadySelected) {
+              context.history.updateState(s => ({
+                ...s,
+                selection: { ids: [hit.id], handles: null }
+              }));
+            }
+          }
+
+          // Prepare for dragging
+          this.mode = SelectMode.DRAGGING;
+          const currentState = context.history.getState();
+          this.draggedIds = [...currentState.selection.ids];
+
+          // Store original positions of all selected objects
+          const page = currentState.project.pages.find(p => p.id === currentState.activePageId);
+          if (page) {
+            this.originalPositions = {};
+            this.draggedIds.forEach(id => {
+              const obj = page.objects.find(o => o.id === id);
+              if (obj) {
+                this.originalPositions[id] = { x: obj.x, y: obj.y };
+              }
+            });
+          }
         } else {
-          // Click on empty space - deselect
-          context.history.updateState(state => ({
-            ...state,
-            selection: { ids: [], handles: null }
-          }));
+          // Click on empty space - start marquee or deselect
+          if (!event.ctrlKey) {
+            context.history.updateState(s => ({
+              ...s,
+              selection: { ids: [], handles: null }
+            }));
+          }
+          this.mode = SelectMode.MARQUEE;
         }
+
         return true;
       }
 
       onMouseMove(event, context) {
         const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+        this.dragCurrent = { col, row, pixelX: event.canvasX, pixelY: event.canvasY };
 
-        if (this.dragging && this.draggedObjectId) {
-          // Update object position (live preview)
-          const newX = col - this.dragOffset.col;
-          const newY = row - this.dragOffset.row;
+        if (this.mode === SelectMode.DRAGGING && this.draggedIds.length > 0) {
+          // Move all selected objects
+          const dx = col - this.dragStart.col;
+          const dy = row - this.dragStart.row;
 
           context.history.updateState(state => {
             const newState = deepClone(state);
             const page = newState.project.pages.find(p => p.id === state.activePageId);
             if (page) {
-              const obj = page.objects.find(o => o.id === this.draggedObjectId);
-              if (obj) {
-                obj.x = newX;
-                obj.y = newY;
-              }
+              this.draggedIds.forEach(id => {
+                const obj = page.objects.find(o => o.id === id);
+                const orig = this.originalPositions[id];
+                if (obj && orig) {
+                  obj.x = orig.x + dx;
+                  obj.y = orig.y + dy;
+                }
+              });
             }
             return newState;
           });
           return true;
         }
 
+        if (this.mode === SelectMode.RESIZING && this.resizeOriginal) {
+          this.performResize(col, row, context);
+          return true;
+        }
+
+        if (this.mode === SelectMode.MARQUEE) {
+          return true;  // Just redraw to show marquee
+        }
+
         // Update cursor based on what's under mouse
-        const hit = this.hitTest(col, row, context);
+        const state = context.history.getState();
+        if (state.selection.ids.length === 1) {
+          const handle = this.hitTestHandle(event.canvasX, event.canvasY, context);
+          if (handle) {
+            context.canvas.style.cursor = this.getHandleCursor(handle.position);
+            return false;
+          }
+        }
+
+        const hit = this.hitTestObject(col, row, context);
         context.canvas.style.cursor = hit ? 'move' : 'default';
 
         return false;
       }
 
       onMouseUp(event, context) {
-        if (this.dragging && this.draggedObjectId) {
-          const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-          const newX = col - this.dragOffset.col;
-          const newY = row - this.dragOffset.row;
+        const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
 
-          // Only create command if actually moved
-          if (newX !== this.originalPos.x || newY !== this.originalPos.y) {
-            // First restore to original position
+        if (this.mode === SelectMode.DRAGGING && this.draggedIds.length > 0) {
+          const dx = col - this.dragStart.col;
+          const dy = row - this.dragStart.row;
+
+          if (dx !== 0 || dy !== 0) {
+            // Restore original positions first
             context.history.updateState(state => {
               const newState = deepClone(state);
               const page = newState.project.pages.find(p => p.id === state.activePageId);
               if (page) {
-                const obj = page.objects.find(o => o.id === this.draggedObjectId);
-                if (obj) {
-                  obj.x = this.originalPos.x;
-                  obj.y = this.originalPos.y;
-                }
+                this.draggedIds.forEach(id => {
+                  const obj = page.objects.find(o => o.id === id);
+                  const orig = this.originalPositions[id];
+                  if (obj && orig) {
+                    obj.x = orig.x;
+                    obj.y = orig.y;
+                  }
+                });
               }
               return newState;
             });
 
-            // Then execute the move command (for undo/redo)
+            // Execute move commands for undo/redo
             const state = context.history.getState();
-            context.history.execute(new MoveObjectCommand(
-              state.activePageId,
-              this.draggedObjectId,
-              this.originalPos,
-              { x: newX, y: newY }
-            ));
+            this.draggedIds.forEach(id => {
+              const orig = this.originalPositions[id];
+              if (orig) {
+                context.history.execute(new MoveObjectCommand(
+                  state.activePageId,
+                  id,
+                  orig,
+                  { x: orig.x + dx, y: orig.y + dy }
+                ));
+              }
+            });
           }
         }
 
-        this.dragging = false;
-        this.draggedObjectId = null;
-        this.dragOffset = null;
-        this.originalPos = null;
+        if (this.mode === SelectMode.RESIZING && this.resizeOriginal) {
+          this.finalizeResize(context);
+        }
+
+        if (this.mode === SelectMode.MARQUEE) {
+          this.performMarqueeSelect(context);
+        }
+
+        this.resetState();
         return true;
       }
 
@@ -516,10 +643,11 @@
           if (state.selection.ids.length > 0) {
             const page = state.project.pages.find(p => p.id === state.activePageId);
             if (page) {
+              // Create delete commands for all selected
               state.selection.ids.forEach(id => {
                 const obj = page.objects.find(o => o.id === id);
                 if (obj) {
-                  context.history.execute(new DeleteObjectCommand(state.activePageId, obj));
+                  context.history.execute(new DeleteObjectCommand(state.activePageId, deepClone(obj)));
                 }
               });
               context.history.updateState(s => ({
@@ -533,7 +661,156 @@
         return false;
       }
 
-      hitTest(col, row, context) {
+      performResize(col, row, context) {
+        const state = context.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+        if (!obj) return;
+
+        const orig = this.resizeOriginal;
+        let newX = orig.x;
+        let newY = orig.y;
+        let newW = orig.width;
+        let newH = orig.height;
+
+        const minSize = 3;
+
+        switch (this.activeHandle) {
+          case HandlePosition.TOP_LEFT:
+            newX = Math.min(col, orig.x + orig.width - minSize);
+            newY = Math.min(row, orig.y + orig.height - minSize);
+            newW = orig.x + orig.width - newX;
+            newH = orig.y + orig.height - newY;
+            break;
+          case HandlePosition.TOP_RIGHT:
+            newY = Math.min(row, orig.y + orig.height - minSize);
+            newW = Math.max(minSize, col - orig.x + 1);
+            newH = orig.y + orig.height - newY;
+            break;
+          case HandlePosition.BOTTOM_LEFT:
+            newX = Math.min(col, orig.x + orig.width - minSize);
+            newW = orig.x + orig.width - newX;
+            newH = Math.max(minSize, row - orig.y + 1);
+            break;
+          case HandlePosition.BOTTOM_RIGHT:
+            newW = Math.max(minSize, col - orig.x + 1);
+            newH = Math.max(minSize, row - orig.y + 1);
+            break;
+        }
+
+        context.history.updateState(s => {
+          const newState = deepClone(s);
+          const pg = newState.project.pages.find(p => p.id === s.activePageId);
+          if (pg) {
+            const o = pg.objects.find(ob => ob.id === s.selection.ids[0]);
+            if (o) {
+              o.x = newX;
+              o.y = newY;
+              o.width = newW;
+              o.height = newH;
+            }
+          }
+          return newState;
+        });
+      }
+
+      finalizeResize(context) {
+        const state = context.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+        if (!obj) return;
+
+        const orig = this.resizeOriginal;
+        const hasChanged = obj.x !== orig.x || obj.y !== orig.y ||
+                          obj.width !== orig.width || obj.height !== orig.height;
+
+        if (hasChanged) {
+          const newProps = { x: obj.x, y: obj.y, width: obj.width, height: obj.height };
+
+          // Restore original
+          context.history.updateState(s => {
+            const newState = deepClone(s);
+            const pg = newState.project.pages.find(p => p.id === s.activePageId);
+            if (pg) {
+              const o = pg.objects.find(ob => ob.id === s.selection.ids[0]);
+              if (o) {
+                o.x = orig.x;
+                o.y = orig.y;
+                o.width = orig.width;
+                o.height = orig.height;
+              }
+            }
+            return newState;
+          });
+
+          // Execute command for undo/redo
+          context.history.execute(new ModifyObjectCommand(
+            state.activePageId,
+            obj.id,
+            { x: orig.x, y: orig.y, width: orig.width, height: orig.height },
+            newProps
+          ));
+        }
+      }
+
+      performMarqueeSelect(context) {
+        if (!this.dragStart || !this.dragCurrent) return;
+
+        const state = context.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        const x1 = Math.min(this.dragStart.col, this.dragCurrent.col);
+        const y1 = Math.min(this.dragStart.row, this.dragCurrent.row);
+        const x2 = Math.max(this.dragStart.col, this.dragCurrent.col);
+        const y2 = Math.max(this.dragStart.row, this.dragCurrent.row);
+
+        // Determine selection mode based on drag direction
+        const leftToRight = this.dragCurrent.col >= this.dragStart.col;
+
+        const selectedIds = [];
+        page.objects.forEach(obj => {
+          const objX1 = obj.x;
+          const objY1 = obj.y;
+          const objX2 = obj.x + (obj.width || 10) - 1;
+          const objY2 = obj.y + (obj.height || 3) - 1;
+
+          let selected = false;
+
+          if (leftToRight) {
+            // Enclosed mode: object must be fully inside marquee
+            selected = objX1 >= x1 && objX2 <= x2 && objY1 >= y1 && objY2 <= y2;
+          } else {
+            // Intersect mode: object just needs to touch marquee
+            selected = !(objX2 < x1 || objX1 > x2 || objY2 < y1 || objY1 > y2);
+          }
+
+          if (selected) {
+            selectedIds.push(obj.id);
+          }
+        });
+
+        // If Ctrl held, add to existing selection
+        if (this.addToSelection) {
+          const existingIds = state.selection.ids;
+          const newIds = [...new Set([...existingIds, ...selectedIds])];
+          context.history.updateState(s => ({
+            ...s,
+            selection: { ids: newIds, handles: null }
+          }));
+        } else {
+          context.history.updateState(s => ({
+            ...s,
+            selection: { ids: selectedIds, handles: null }
+          }));
+        }
+      }
+
+      hitTestObject(col, row, context) {
         const state = context.history.getState();
         const page = state.project.pages.find(p => p.id === state.activePageId);
         if (!page) return null;
@@ -548,6 +825,50 @@
         return null;
       }
 
+      hitTestHandle(pixelX, pixelY, context) {
+        const state = context.history.getState();
+        if (state.selection.ids.length !== 1) return null;
+
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return null;
+
+        const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+        if (!obj) return null;
+
+        const { x, y } = context.grid.charToPixel(obj.x, obj.y);
+        const width = (obj.width || 10) * context.grid.charWidth;
+        const height = (obj.height || 3) * context.grid.charHeight;
+
+        const handleSize = 8;
+        const handles = [
+          { position: HandlePosition.TOP_LEFT, hx: x, hy: y },
+          { position: HandlePosition.TOP_RIGHT, hx: x + width, hy: y },
+          { position: HandlePosition.BOTTOM_LEFT, hx: x, hy: y + height },
+          { position: HandlePosition.BOTTOM_RIGHT, hx: x + width, hy: y + height }
+        ];
+
+        for (const h of handles) {
+          if (Math.abs(pixelX - h.hx) <= handleSize && Math.abs(pixelY - h.hy) <= handleSize) {
+            return { position: h.position, obj };
+          }
+        }
+
+        return null;
+      }
+
+      getHandleCursor(position) {
+        switch (position) {
+          case HandlePosition.TOP_LEFT:
+          case HandlePosition.BOTTOM_RIGHT:
+            return 'nwse-resize';
+          case HandlePosition.TOP_RIGHT:
+          case HandlePosition.BOTTOM_LEFT:
+            return 'nesw-resize';
+          default:
+            return 'default';
+        }
+      }
+
       objectContainsPoint(obj, col, row) {
         const width = obj.width || 10;
         const height = obj.height || 3;
@@ -560,7 +881,45 @@
         const page = state.project.pages.find(p => p.id === state.activePageId);
         if (!page) return;
 
-        // Draw selection rectangles
+        // Get CSS variables for colors
+        const styles = getComputedStyle(document.documentElement);
+        const selectionStroke = styles.getPropertyValue('--selection-stroke').trim() || '#007acc';
+        const marqueeEnclosedStroke = styles.getPropertyValue('--marquee-enclosed-stroke').trim() || '#007acc';
+        const marqueeEnclosedFill = styles.getPropertyValue('--marquee-enclosed-fill').trim() || 'rgba(0, 122, 204, 0.1)';
+        const marqueeIntersectStroke = styles.getPropertyValue('--marquee-intersect-stroke').trim() || '#00cc7a';
+        const marqueeIntersectFill = styles.getPropertyValue('--marquee-intersect-fill').trim() || 'rgba(0, 204, 122, 0.1)';
+
+        // Draw marquee selection rectangle
+        if (this.mode === SelectMode.MARQUEE && this.dragStart && this.dragCurrent) {
+          const x1 = Math.min(this.dragStart.pixelX, this.dragCurrent.pixelX);
+          const y1 = Math.min(this.dragStart.pixelY, this.dragCurrent.pixelY);
+          const w = Math.abs(this.dragCurrent.pixelX - this.dragStart.pixelX);
+          const h = Math.abs(this.dragCurrent.pixelY - this.dragStart.pixelY);
+
+          const leftToRight = this.dragCurrent.col >= this.dragStart.col;
+
+          ctx.lineWidth = 1;
+
+          if (leftToRight) {
+            // Enclosed mode: solid line
+            ctx.setLineDash([]);
+            ctx.strokeStyle = marqueeEnclosedStroke;
+            ctx.fillStyle = marqueeEnclosedFill;
+          } else {
+            // Intersect mode: dashed line
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = marqueeIntersectStroke;
+            ctx.fillStyle = marqueeIntersectFill;
+          }
+
+          ctx.fillRect(x1, y1, w, h);
+          ctx.strokeRect(x1, y1, w, h);
+          ctx.setLineDash([]);
+        }
+
+        // Draw selection rectangles for each selected object
+        const isSingleSelection = state.selection.ids.length === 1;
+
         state.selection.ids.forEach(id => {
           const obj = page.objects.find(o => o.id === id);
           if (obj) {
@@ -568,20 +927,22 @@
             const width = (obj.width || 10) * context.grid.charWidth;
             const height = (obj.height || 3) * context.grid.charHeight;
 
-            ctx.strokeStyle = '#007acc';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 3]);
-            ctx.strokeRect(x - 2, y - 2, width + 4, height + 4);
+            ctx.strokeStyle = selectionStroke;
+            ctx.lineWidth = 1;
             ctx.setLineDash([]);
+            ctx.strokeRect(x - 1, y - 1, width + 2, height + 2);
 
-            // Draw resize handles
-            const handleSize = 6;
-            ctx.fillStyle = '#007acc';
-            // Corners
-            ctx.fillRect(x - handleSize/2, y - handleSize/2, handleSize, handleSize);
-            ctx.fillRect(x + width - handleSize/2, y - handleSize/2, handleSize, handleSize);
-            ctx.fillRect(x - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
-            ctx.fillRect(x + width - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
+            // Draw resize handles only for single selection
+            if (isSingleSelection) {
+              const handleSize = 6;
+              ctx.fillStyle = selectionStroke;
+
+              // Corner handles
+              ctx.fillRect(x - handleSize/2, y - handleSize/2, handleSize, handleSize);
+              ctx.fillRect(x + width - handleSize/2, y - handleSize/2, handleSize, handleSize);
+              ctx.fillRect(x - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
+              ctx.fillRect(x + width - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
+            }
           }
         });
       }
@@ -674,14 +1035,17 @@
           const pixelWidth = width * context.grid.charWidth;
           const pixelHeight = height * context.grid.charHeight;
 
-          ctx.strokeStyle = '#007acc';
+          const styles = getComputedStyle(document.documentElement);
+          const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
+
+          ctx.strokeStyle = accent;
           ctx.lineWidth = 1;
           ctx.setLineDash([5, 3]);
           ctx.strokeRect(pixelPos.x, pixelPos.y, pixelWidth, pixelHeight);
           ctx.setLineDash([]);
 
           // Size indicator
-          ctx.fillStyle = '#007acc';
+          ctx.fillStyle = accent;
           ctx.font = '11px sans-serif';
           ctx.fillText(`${width}x${height}`, pixelPos.x + 4, pixelPos.y - 4);
         }
@@ -858,14 +1222,18 @@
       }
 
       clear() {
-        this.ctx.fillStyle = '#1a1a1a';
+        const styles = getComputedStyle(document.documentElement);
+        const bgCanvas = styles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+        this.ctx.fillStyle = bgCanvas;
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
       }
 
       drawGrid(cols, rows, showGrid) {
         if (!showGrid) return;
 
-        this.ctx.strokeStyle = '#2a2a2a';
+        const styles = getComputedStyle(document.documentElement);
+        const gridColor = styles.getPropertyValue('--bg-grid').trim() || '#2a2a2a';
+        this.ctx.strokeStyle = gridColor;
         this.ctx.lineWidth = 0.5;
 
         // Vertical lines
@@ -887,9 +1255,14 @@
         }
       }
 
-      drawChar(char, col, row, color = '#cccccc') {
+      drawChar(char, col, row, color = null) {
         const font = this.fontLoaded ? 'BerkeleyMono' : 'monospace';
         this.ctx.font = `16px ${font}`;
+
+        if (color === null) {
+          const styles = getComputedStyle(document.documentElement);
+          color = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
+        }
         this.ctx.fillStyle = color;
         this.ctx.textBaseline = 'top';
 
@@ -898,7 +1271,7 @@
         this.ctx.fillText(char, x, y + 2); // +2 for vertical alignment
       }
 
-      drawText(text, col, row, color = '#cccccc') {
+      drawText(text, col, row, color = null) {
         for (let i = 0; i < text.length; i++) {
           this.drawChar(text[i], col + i, row, color);
         }
@@ -915,17 +1288,19 @@
         };
 
         const c = chars[style] || chars.single;
-        const color = '#cccccc';
+        const styles = getComputedStyle(document.documentElement);
+        const color = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
+        const shadowColor = styles.getPropertyValue('--text-shadow').trim() || '#555555';
 
         // Draw shadow first if enabled
         if (shadow) {
           for (let row = 1; row <= height; row++) {
-            this.drawChar('░', x + width, y + row, '#555555');
+            this.drawChar('░', x + width, y + row, shadowColor);
           }
           for (let col = 1; col < width; col++) {
-            this.drawChar('░', x + col, y + height, '#555555');
+            this.drawChar('░', x + col, y + height, shadowColor);
           }
-          this.drawChar('░', x + width, y + height, '#555555');
+          this.drawChar('░', x + width, y + height, shadowColor);
         }
 
         // Top border

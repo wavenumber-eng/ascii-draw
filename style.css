@@ -15,13 +15,33 @@
 }
 
 :root {
+  /* Background colors */
   --bg-primary: #1e1e1e;
   --bg-secondary: #252526;
   --bg-tertiary: #2d2d30;
+  --bg-canvas: #1a1a1a;
+  --bg-grid: #2a2a2a;
+
+  /* Text colors */
   --text-primary: #cccccc;
   --text-secondary: #858585;
+  --text-canvas: #cccccc;
+  --text-shadow: #555555;
+
+  /* Accent colors */
   --accent: #007acc;
+  --accent-secondary: #00cc7a;
   --border: #3c3c3c;
+
+  /* Selection colors */
+  --selection-stroke: #007acc;
+  --selection-fill: rgba(0, 122, 204, 0.1);
+  --marquee-enclosed-stroke: #007acc;
+  --marquee-enclosed-fill: rgba(0, 122, 204, 0.1);
+  --marquee-intersect-stroke: #00cc7a;
+  --marquee-intersect-fill: rgba(0, 204, 122, 0.1);
+
+  /* Layout */
   --toolbar-height: 40px;
   --tabbar-height: 32px;
   --statusbar-height: 24px;
@@ -108,7 +128,7 @@ body {
 
 #editor-canvas {
   display: block;
-  background: #1a1a1a;
+  background: var(--bg-canvas);
 }
 
 /* ========== Page Tabs ========== */
