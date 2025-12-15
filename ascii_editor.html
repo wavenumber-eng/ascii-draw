@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASCII Diagram Editor</title>
+  <style>
+    /* ========== CSS Reset & Base ========== */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg-primary: #1e1e1e;
+      --bg-secondary: #252526;
+      --bg-tertiary: #2d2d30;
+      --text-primary: #cccccc;
+      --text-secondary: #858585;
+      --accent: #007acc;
+      --border: #3c3c3c;
+      --toolbar-height: 40px;
+      --tabbar-height: 32px;
+      --statusbar-height: 24px;
+    }
+
+    @font-face {
+      font-family: 'BerkeleyMono';
+      src: url('BerkeleyMono-Regular.woff2') format('woff2'),
+           url('BerkeleyMono-Regular.ttf') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ========== Toolbar ========== */
+    #toolbar {
+      height: var(--toolbar-height);
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      gap: 4px;
+    }
+
+    .tool-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-primary);
+      padding: 4px 8px;
+      cursor: pointer;
+      border-radius: 3px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .tool-btn:hover {
+      background: var(--bg-tertiary);
+    }
+
+    .tool-btn.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    .tool-separator {
+      width: 1px;
+      height: 20px;
+      background: var(--border);
+      margin: 0 4px;
+    }
+
+    .toolbar-spacer {
+      flex: 1;
+    }
+
+    /* ========== Main Content ========== */
+    #main-content {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* ========== Canvas Container ========== */
+    #canvas-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #canvas-wrapper {
+      flex: 1;
+      overflow: auto;
+      background: var(--bg-primary);
+      position: relative;
+    }
+
+    #editor-canvas {
+      display: block;
+      background: #1a1a1a;
+    }
+
+    /* ========== Page Tabs ========== */
+    #page-tabs {
+      height: var(--tabbar-height);
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 4px;
+      gap: 2px;
+      overflow-x: auto;
+    }
+
+    .page-tab {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      color: var(--text-secondary);
+      padding: 4px 12px;
+      cursor: pointer;
+      border-radius: 4px 4px 0 0;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .page-tab:hover {
+      color: var(--text-primary);
+    }
+
+    .page-tab.active {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      border-color: var(--accent);
+      border-bottom: 1px solid var(--bg-primary);
+    }
+
+    .page-tab-add {
+      background: transparent;
+      border: 1px dashed var(--border);
+      color: var(--text-secondary);
+      padding: 4px 8px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .page-tab-add:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ========== Status Bar ========== */
+    #status-bar {
+      height: var(--statusbar-height);
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      gap: 16px;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* ========== Keyboard Shortcut Hints ========== */
+    kbd {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1px 4px;
+      font-size: 10px;
+      font-family: inherit;
+    }
+  </style>
+</head>
+<body>
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <button class="tool-btn active" data-tool="select" title="Select (V)">
+      <span>Select</span>
+      <kbd>V</kbd>
+    </button>
+    <button class="tool-btn" data-tool="box" title="Box (B)">
+      <span>Box</span>
+      <kbd>B</kbd>
+    </button>
+    <button class="tool-btn" data-tool="text" title="Text (T)">
+      <span>Text</span>
+      <kbd>T</kbd>
+    </button>
+    <button class="tool-btn" data-tool="line" title="Line (L)">
+      <span>Line</span>
+      <kbd>L</kbd>
+    </button>
+
+    <div class="tool-separator"></div>
+
+    <button class="tool-btn" data-tool="symbol" title="Symbol (S)">
+      <span>Symbol</span>
+      <kbd>S</kbd>
+    </button>
+    <button class="tool-btn" data-tool="wire" title="Wire (W)">
+      <span>Wire</span>
+      <kbd>W</kbd>
+    </button>
+    <button class="tool-btn" data-tool="port" title="Port (P)">
+      <span>Port</span>
+      <kbd>P</kbd>
+    </button>
+    <button class="tool-btn" data-tool="power" title="Power (O)">
+      <span>Power</span>
+      <kbd>O</kbd>
+    </button>
+
+    <div class="toolbar-spacer"></div>
+
+    <button class="tool-btn" id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button class="tool-btn" id="btn-redo" title="Redo (Ctrl+Y)">Redo</button>
+
+    <div class="tool-separator"></div>
+
+    <button class="tool-btn" id="btn-grid" title="Toggle Grid (G)">Grid</button>
+    <button class="tool-btn" id="btn-export" title="Export ASCII (Ctrl+E)">Export</button>
+    <button class="tool-btn" id="btn-save" title="Save (Ctrl+S)">Save</button>
+    <button class="tool-btn" id="btn-load" title="Load">Load</button>
+  </div>
+
+  <!-- Main Content -->
+  <div id="main-content">
+    <div id="canvas-container">
+      <div id="canvas-wrapper">
+        <canvas id="editor-canvas"></canvas>
+      </div>
+      <div id="page-tabs">
+        <!-- Tabs populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div id="status-bar">
+    <span class="status-item" id="status-tool">Tool: Select</span>
+    <span class="status-item" id="status-position">Col: 0, Row: 0</span>
+    <span class="status-item" id="status-selection">Selected: 0</span>
+    <span class="status-item" id="status-zoom">Zoom: 100%</span>
+    <span class="status-item" id="status-page">Page: 1/1</span>
+    <div style="flex:1"></div>
+    <span class="status-item" id="status-history">History: 0/0</span>
+  </div>
+
+  <script>
+    // ============================================================
+    // UTILITIES
+    // ============================================================
+
+    function generateId() {
+      return 'id-' + Math.random().toString(36).substr(2, 9);
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(Math.max(value, min), max);
+    }
+
+    function deepClone(obj) {
+      return JSON.parse(JSON.stringify(obj));
+    }
+
+    // ============================================================
+    // CHARACTER GRID
+    // ============================================================
+
+    class CharacterGrid {
+      constructor(charWidth, charHeight) {
+        this.charWidth = charWidth;
+        this.charHeight = charHeight;
+      }
+
+      // Pixel to character coordinates
+      pixelToChar(px, py) {
+        return {
+          col: Math.floor(px / this.charWidth),
+          row: Math.floor(py / this.charHeight)
+        };
+      }
+
+      // Character to pixel coordinates (top-left of cell)
+      charToPixel(col, row) {
+        return {
+          x: col * this.charWidth,
+          y: row * this.charHeight
+        };
+      }
+
+      // Get pixel bounds for a character cell
+      getCellBounds(col, row) {
+        return {
+          x: col * this.charWidth,
+          y: row * this.charHeight,
+          width: this.charWidth,
+          height: this.charHeight
+        };
+      }
+
+      // Snap pixel coordinates to grid
+      snapToGrid(px, py) {
+        const char = this.pixelToChar(px, py);
+        return this.charToPixel(char.col, char.row);
+      }
+    }
+
+    // ============================================================
+    // COMMAND PATTERN (for Undo/Redo)
+    // ============================================================
+
+    class Command {
+      execute(state) { return state; }
+      undo(state) { return state; }
+      canMerge(other) { return false; }
+      merge(other) { return this; }
+    }
+
+    class CreateObjectCommand extends Command {
+      constructor(pageId, object) {
+        super();
+        this.pageId = pageId;
+        this.object = object;
+      }
+
+      execute(state) {
+        const newState = deepClone(state);
+        const page = newState.project.pages.find(p => p.id === this.pageId);
+        if (page) {
+          page.objects.push(this.object);
+        }
+        return newState;
+      }
+
+      undo(state) {
+        const newState = deepClone(state);
+        const page = newState.project.pages.find(p => p.id === this.pageId);
+        if (page) {
+          page.objects = page.objects.filter(o => o.id !== this.object.id);
+        }
+        return newState;
+      }
+    }
+
+    class DeleteObjectCommand extends Command {
+      constructor(pageId, object) {
+        super();
+        this.pageId = pageId;
+        this.object = object;
+      }
+
+      execute(state) {
+        const newState = deepClone(state);
+        const page = newState.project.pages.find(p => p.id === this.pageId);
+        if (page) {
+          page.objects = page.objects.filter(o => o.id !== this.object.id);
+        }
+        return newState;
+      }
+
+      undo(state) {
+        const newState = deepClone(state);
+        const page = newState.project.pages.find(p => p.id === this.pageId);
+        if (page) {
+          page.objects.push(this.object);
+        }
+        return newState;
+      }
+    }
+
+    class MoveObjectCommand extends Command {
+      constructor(pageId, objectId, fromPos, toPos) {
+        super();
+        this.pageId = pageId;
+        this.objectId = objectId;
+        this.fromPos = fromPos;
+        this.toPos = toPos;
+      }
+
+      execute(state) {
+        const newState = deepClone(state);
+        const page = newState.project.pages.find(p => p.id === this.pageId);
+        if (page) {
+          const obj = page.objects.find(o => o.id === this.objectId);
+          if (obj) {
+            obj.x = this.toPos.x;
+            obj.y = this.toPos.y;
+          }
+        }
+        return newState;
+      }
+
+      undo(state) {
+        const newState = deepClone(state);
+        const page = newState.project.pages.find(p => p.id === this.pageId);
+        if (page) {
+          const obj = page.objects.find(o => o.id === this.objectId);
+          if (obj) {
+            obj.x = this.fromPos.x;
+            obj.y = this.fromPos.y;
+          }
+        }
+        return newState;
+      }
+
+      canMerge(other) {
+        return other instanceof MoveObjectCommand &&
+               other.objectId === this.objectId &&
+               other.pageId === this.pageId;
+      }
+
+      merge(other) {
+        return new MoveObjectCommand(this.pageId, this.objectId, this.fromPos, other.toPos);
+      }
+    }
+
+    class ModifyObjectCommand extends Command {
+      constructor(pageId, objectId, oldProps, newProps) {
+        super();
+        this.pageId = pageId;
+        this.objectId = objectId;
+        this.oldProps = oldProps;
+        this.newProps = newProps;
+      }
+
+      execute(state) {
+        const newState = deepClone(state);
+        const page = newState.project.pages.find(p => p.id === this.pageId);
+        if (page) {
+          const obj = page.objects.find(o => o.id === this.objectId);
+          if (obj) {
+            Object.assign(obj, this.newProps);
+          }
+        }
+        return newState;
+      }
+
+      undo(state) {
+        const newState = deepClone(state);
+        const page = newState.project.pages.find(p => p.id === this.pageId);
+        if (page) {
+          const obj = page.objects.find(o => o.id === this.objectId);
+          if (obj) {
+            Object.assign(obj, this.oldProps);
+          }
+        }
+        return newState;
+      }
+    }
+
+    // ============================================================
+    // HISTORY MANAGER
+    // ============================================================
+
+    class HistoryManager {
+      constructor(initialState, maxHistory = 100) {
+        this.state = initialState;
+        this.undoStack = [];
+        this.redoStack = [];
+        this.maxHistory = maxHistory;
+        this.listeners = [];
+      }
+
+      getState() {
+        return this.state;
+      }
+
+      execute(command) {
+        // Try to merge with last command
+        if (this.undoStack.length > 0) {
+          const last = this.undoStack[this.undoStack.length - 1];
+          if (last.canMerge && last.canMerge(command)) {
+            this.undoStack[this.undoStack.length - 1] = last.merge(command);
+            this.state = command.execute(this.state);
+            this.redoStack = [];
+            this.notifyListeners();
+            return;
+          }
+        }
+
+        this.state = command.execute(this.state);
+        this.undoStack.push(command);
+        this.redoStack = [];
+
+        // Limit history size
+        if (this.undoStack.length > this.maxHistory) {
+          this.undoStack.shift();
+        }
+
+        this.notifyListeners();
+      }
+
+      undo() {
+        if (this.undoStack.length === 0) return false;
+        const command = this.undoStack.pop();
+        this.state = command.undo(this.state);
+        this.redoStack.push(command);
+        this.notifyListeners();
+        return true;
+      }
+
+      redo() {
+        if (this.redoStack.length === 0) return false;
+        const command = this.redoStack.pop();
+        this.state = command.execute(this.state);
+        this.undoStack.push(command);
+        this.notifyListeners();
+        return true;
+      }
+
+      canUndo() {
+        return this.undoStack.length > 0;
+      }
+
+      canRedo() {
+        return this.redoStack.length > 0;
+      }
+
+      subscribe(listener) {
+        this.listeners.push(listener);
+        return () => {
+          this.listeners = this.listeners.filter(l => l !== listener);
+        };
+      }
+
+      notifyListeners() {
+        this.listeners.forEach(l => l(this.state));
+      }
+
+      // Direct state update (for non-undoable changes like selection, view state)
+      updateState(updater) {
+        this.state = updater(this.state);
+        this.notifyListeners();
+      }
+    }
+
+    // ============================================================
+    // TOOL BASE CLASS
+    // ============================================================
+
+    class Tool {
+      constructor(name) {
+        this.name = name;
+        this.cursor = 'default';
+      }
+
+      activate(context) {}
+      deactivate() {}
+
+      onMouseDown(event, context) { return false; }
+      onMouseMove(event, context) { return false; }
+      onMouseUp(event, context) { return false; }
+      onKeyDown(event, context) { return false; }
+      onKeyUp(event, context) { return false; }
+      onDoubleClick(event, context) { return false; }
+
+      renderOverlay(ctx, context) {}
+    }
+
+    // ============================================================
+    // SELECT TOOL
+    // ============================================================
+
+    class SelectTool extends Tool {
+      constructor() {
+        super('select');
+        this.cursor = 'default';
+        this.dragging = false;
+        this.dragStart = null;
+        this.draggedObjectId = null;
+        this.dragOffset = null;
+        this.originalPos = null;
+      }
+
+      activate(context) {
+        this.dragging = false;
+        this.draggedObjectId = null;
+      }
+
+      onMouseDown(event, context) {
+        const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+        const hit = this.hitTest(col, row, context);
+
+        if (hit) {
+          // Select and prepare to drag
+          context.history.updateState(state => ({
+            ...state,
+            selection: { ids: [hit.id], handles: null }
+          }));
+          this.dragging = true;
+          this.draggedObjectId = hit.id;
+          this.dragStart = { col, row };
+          this.originalPos = { x: hit.x, y: hit.y };
+          this.dragOffset = { col: col - hit.x, row: row - hit.y };
+        } else {
+          // Click on empty space - deselect
+          context.history.updateState(state => ({
+            ...state,
+            selection: { ids: [], handles: null }
+          }));
+        }
+        return true;
+      }
+
+      onMouseMove(event, context) {
+        const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+
+        if (this.dragging && this.draggedObjectId) {
+          // Update object position (live preview)
+          const newX = col - this.dragOffset.col;
+          const newY = row - this.dragOffset.row;
+
+          context.history.updateState(state => {
+            const newState = deepClone(state);
+            const page = newState.project.pages.find(p => p.id === state.activePageId);
+            if (page) {
+              const obj = page.objects.find(o => o.id === this.draggedObjectId);
+              if (obj) {
+                obj.x = newX;
+                obj.y = newY;
+              }
+            }
+            return newState;
+          });
+          return true;
+        }
+
+        // Update cursor based on what's under mouse
+        const hit = this.hitTest(col, row, context);
+        context.canvas.style.cursor = hit ? 'move' : 'default';
+
+        return false;
+      }
+
+      onMouseUp(event, context) {
+        if (this.dragging && this.draggedObjectId) {
+          const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+          const newX = col - this.dragOffset.col;
+          const newY = row - this.dragOffset.row;
+
+          // Only create command if actually moved
+          if (newX !== this.originalPos.x || newY !== this.originalPos.y) {
+            // First restore to original position
+            context.history.updateState(state => {
+              const newState = deepClone(state);
+              const page = newState.project.pages.find(p => p.id === state.activePageId);
+              if (page) {
+                const obj = page.objects.find(o => o.id === this.draggedObjectId);
+                if (obj) {
+                  obj.x = this.originalPos.x;
+                  obj.y = this.originalPos.y;
+                }
+              }
+              return newState;
+            });
+
+            // Then execute the move command (for undo/redo)
+            const state = context.history.getState();
+            context.history.execute(new MoveObjectCommand(
+              state.activePageId,
+              this.draggedObjectId,
+              this.originalPos,
+              { x: newX, y: newY }
+            ));
+          }
+        }
+
+        this.dragging = false;
+        this.draggedObjectId = null;
+        this.dragOffset = null;
+        this.originalPos = null;
+        return true;
+      }
+
+      onKeyDown(event, context) {
+        const state = context.history.getState();
+
+        // Delete selected objects
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+          if (state.selection.ids.length > 0) {
+            const page = state.project.pages.find(p => p.id === state.activePageId);
+            if (page) {
+              state.selection.ids.forEach(id => {
+                const obj = page.objects.find(o => o.id === id);
+                if (obj) {
+                  context.history.execute(new DeleteObjectCommand(state.activePageId, obj));
+                }
+              });
+              context.history.updateState(s => ({
+                ...s,
+                selection: { ids: [], handles: null }
+              }));
+            }
+            return true;
+          }
+        }
+        return false;
+      }
+
+      hitTest(col, row, context) {
+        const state = context.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return null;
+
+        // Check objects in reverse order (top-most first)
+        for (let i = page.objects.length - 1; i >= 0; i--) {
+          const obj = page.objects[i];
+          if (this.objectContainsPoint(obj, col, row)) {
+            return obj;
+          }
+        }
+        return null;
+      }
+
+      objectContainsPoint(obj, col, row) {
+        const width = obj.width || 10;
+        const height = obj.height || 3;
+        return col >= obj.x && col < obj.x + width &&
+               row >= obj.y && row < obj.y + height;
+      }
+
+      renderOverlay(ctx, context) {
+        const state = context.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        // Draw selection rectangles
+        state.selection.ids.forEach(id => {
+          const obj = page.objects.find(o => o.id === id);
+          if (obj) {
+            const { x, y } = context.grid.charToPixel(obj.x, obj.y);
+            const width = (obj.width || 10) * context.grid.charWidth;
+            const height = (obj.height || 3) * context.grid.charHeight;
+
+            ctx.strokeStyle = '#007acc';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 3]);
+            ctx.strokeRect(x - 2, y - 2, width + 4, height + 4);
+            ctx.setLineDash([]);
+
+            // Draw resize handles
+            const handleSize = 6;
+            ctx.fillStyle = '#007acc';
+            // Corners
+            ctx.fillRect(x - handleSize/2, y - handleSize/2, handleSize, handleSize);
+            ctx.fillRect(x + width - handleSize/2, y - handleSize/2, handleSize, handleSize);
+            ctx.fillRect(x - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
+            ctx.fillRect(x + width - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
+          }
+        });
+      }
+    }
+
+    // ============================================================
+    // BOX TOOL
+    // ============================================================
+
+    class BoxTool extends Tool {
+      constructor() {
+        super('box');
+        this.cursor = 'crosshair';
+        this.drawing = false;
+        this.startPos = null;
+        this.currentPos = null;
+      }
+
+      activate(context) {
+        this.drawing = false;
+        context.canvas.style.cursor = this.cursor;
+      }
+
+      onMouseDown(event, context) {
+        const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+        this.drawing = true;
+        this.startPos = { col, row };
+        this.currentPos = { col, row };
+        return true;
+      }
+
+      onMouseMove(event, context) {
+        if (this.drawing) {
+          const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+          this.currentPos = { col, row };
+          return true; // Request redraw
+        }
+        return false;
+      }
+
+      onMouseUp(event, context) {
+        if (this.drawing) {
+          const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+          this.currentPos = { col, row };
+
+          // Calculate box bounds
+          const x = Math.min(this.startPos.col, this.currentPos.col);
+          const y = Math.min(this.startPos.row, this.currentPos.row);
+          const width = Math.abs(this.currentPos.col - this.startPos.col) + 1;
+          const height = Math.abs(this.currentPos.row - this.startPos.row) + 1;
+
+          // Minimum size
+          if (width >= 3 && height >= 3) {
+            const state = context.history.getState();
+            const newBox = {
+              id: generateId(),
+              type: 'box',
+              x, y, width, height,
+              text: '',
+              style: 'single',  // single, double, rounded
+              shadow: false,
+              textAlign: 'center'
+            };
+
+            context.history.execute(new CreateObjectCommand(state.activePageId, newBox));
+
+            // Select the new box
+            context.history.updateState(s => ({
+              ...s,
+              selection: { ids: [newBox.id], handles: null }
+            }));
+          }
+
+          this.drawing = false;
+          this.startPos = null;
+          this.currentPos = null;
+          return true;
+        }
+        return false;
+      }
+
+      renderOverlay(ctx, context) {
+        if (this.drawing && this.startPos && this.currentPos) {
+          const x = Math.min(this.startPos.col, this.currentPos.col);
+          const y = Math.min(this.startPos.row, this.currentPos.row);
+          const width = Math.abs(this.currentPos.col - this.startPos.col) + 1;
+          const height = Math.abs(this.currentPos.row - this.startPos.row) + 1;
+
+          const pixelPos = context.grid.charToPixel(x, y);
+          const pixelWidth = width * context.grid.charWidth;
+          const pixelHeight = height * context.grid.charHeight;
+
+          ctx.strokeStyle = '#007acc';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([5, 3]);
+          ctx.strokeRect(pixelPos.x, pixelPos.y, pixelWidth, pixelHeight);
+          ctx.setLineDash([]);
+
+          // Size indicator
+          ctx.fillStyle = '#007acc';
+          ctx.font = '11px sans-serif';
+          ctx.fillText(`${width}x${height}`, pixelPos.x + 4, pixelPos.y - 4);
+        }
+      }
+    }
+
+    // ============================================================
+    // TOOL MANAGER
+    // ============================================================
+
+    class ToolManager {
+      constructor() {
+        this.tools = {};
+        this.activeTool = null;
+        this.context = null;
+      }
+
+      register(tool) {
+        this.tools[tool.name] = tool;
+      }
+
+      setContext(context) {
+        this.context = context;
+      }
+
+      activate(toolName) {
+        if (this.activeTool) {
+          this.activeTool.deactivate();
+        }
+
+        const tool = this.tools[toolName];
+        if (tool) {
+          this.activeTool = tool;
+          tool.activate(this.context);
+          return true;
+        }
+        return false;
+      }
+
+      getActiveTool() {
+        return this.activeTool;
+      }
+
+      onMouseDown(event) {
+        if (this.activeTool && this.context) {
+          return this.activeTool.onMouseDown(event, this.context);
+        }
+        return false;
+      }
+
+      onMouseMove(event) {
+        if (this.activeTool && this.context) {
+          return this.activeTool.onMouseMove(event, this.context);
+        }
+        return false;
+      }
+
+      onMouseUp(event) {
+        if (this.activeTool && this.context) {
+          return this.activeTool.onMouseUp(event, this.context);
+        }
+        return false;
+      }
+
+      onKeyDown(event) {
+        if (this.activeTool && this.context) {
+          return this.activeTool.onKeyDown(event, this.context);
+        }
+        return false;
+      }
+
+      onKeyUp(event) {
+        if (this.activeTool && this.context) {
+          return this.activeTool.onKeyUp(event, this.context);
+        }
+        return false;
+      }
+
+      onDoubleClick(event) {
+        if (this.activeTool && this.context) {
+          return this.activeTool.onDoubleClick(event, this.context);
+        }
+        return false;
+      }
+
+      renderOverlay(ctx) {
+        if (this.activeTool && this.context) {
+          this.activeTool.renderOverlay(ctx, this.context);
+        }
+      }
+    }
+
+    // ============================================================
+    // HOTKEY MANAGER
+    // ============================================================
+
+    class HotkeyManager {
+      constructor() {
+        this.bindings = new Map();
+        this.contexts = [];
+      }
+
+      register(combo, action, context = 'global') {
+        const key = `${context}:${combo.toLowerCase()}`;
+        this.bindings.set(key, action);
+      }
+
+      handleKeyDown(event) {
+        const combo = this.eventToCombo(event);
+
+        // Check context-specific first, then global
+        for (const ctx of [...this.contexts, 'global']) {
+          const key = `${ctx}:${combo}`;
+          if (this.bindings.has(key)) {
+            event.preventDefault();
+            this.bindings.get(key)();
+            return true;
+          }
+        }
+        return false;
+      }
+
+      eventToCombo(event) {
+        const parts = [];
+        if (event.ctrlKey || event.metaKey) parts.push('ctrl');
+        if (event.shiftKey) parts.push('shift');
+        if (event.altKey) parts.push('alt');
+
+        let key = event.key.toLowerCase();
+        if (key === ' ') key = 'space';
+        parts.push(key);
+
+        return parts.join('+');
+      }
+
+      pushContext(context) {
+        this.contexts.push(context);
+      }
+
+      popContext() {
+        return this.contexts.pop();
+      }
+    }
+
+    // ============================================================
+    // RENDERER
+    // ============================================================
+
+    class Renderer {
+      constructor(canvas, grid) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.grid = grid;
+        this.fontLoaded = false;
+      }
+
+      async loadFont() {
+        try {
+          await document.fonts.load('16px BerkeleyMono');
+          this.fontLoaded = true;
+          console.log('BerkeleyMono font loaded');
+        } catch (e) {
+          console.warn('Could not load BerkeleyMono, using fallback');
+        }
+      }
+
+      setCanvasSize(width, height) {
+        const dpr = window.devicePixelRatio || 1;
+        this.canvas.width = width * dpr;
+        this.canvas.height = height * dpr;
+        this.canvas.style.width = width + 'px';
+        this.canvas.style.height = height + 'px';
+        this.ctx.scale(dpr, dpr);
+      }
+
+      clear() {
+        this.ctx.fillStyle = '#1a1a1a';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      }
+
+      drawGrid(cols, rows, showGrid) {
+        if (!showGrid) return;
+
+        this.ctx.strokeStyle = '#2a2a2a';
+        this.ctx.lineWidth = 0.5;
+
+        // Vertical lines
+        for (let c = 0; c <= cols; c++) {
+          const x = c * this.grid.charWidth;
+          this.ctx.beginPath();
+          this.ctx.moveTo(x, 0);
+          this.ctx.lineTo(x, rows * this.grid.charHeight);
+          this.ctx.stroke();
+        }
+
+        // Horizontal lines
+        for (let r = 0; r <= rows; r++) {
+          const y = r * this.grid.charHeight;
+          this.ctx.beginPath();
+          this.ctx.moveTo(0, y);
+          this.ctx.lineTo(cols * this.grid.charWidth, y);
+          this.ctx.stroke();
+        }
+      }
+
+      drawChar(char, col, row, color = '#cccccc') {
+        const font = this.fontLoaded ? 'BerkeleyMono' : 'monospace';
+        this.ctx.font = `16px ${font}`;
+        this.ctx.fillStyle = color;
+        this.ctx.textBaseline = 'top';
+
+        const x = col * this.grid.charWidth;
+        const y = row * this.grid.charHeight;
+        this.ctx.fillText(char, x, y + 2); // +2 for vertical alignment
+      }
+
+      drawText(text, col, row, color = '#cccccc') {
+        for (let i = 0; i < text.length; i++) {
+          this.drawChar(text[i], col + i, row, color);
+        }
+      }
+
+      drawBox(obj) {
+        const { x, y, width, height, style, shadow } = obj;
+
+        // Box drawing characters
+        const chars = {
+          single: { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' },
+          double: { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' },
+          rounded: { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' }
+        };
+
+        const c = chars[style] || chars.single;
+        const color = '#cccccc';
+
+        // Draw shadow first if enabled
+        if (shadow) {
+          for (let row = 1; row <= height; row++) {
+            this.drawChar('░', x + width, y + row, '#555555');
+          }
+          for (let col = 1; col < width; col++) {
+            this.drawChar('░', x + col, y + height, '#555555');
+          }
+          this.drawChar('░', x + width, y + height, '#555555');
+        }
+
+        // Top border
+        this.drawChar(c.tl, x, y, color);
+        for (let col = 1; col < width - 1; col++) {
+          this.drawChar(c.h, x + col, y, color);
+        }
+        this.drawChar(c.tr, x + width - 1, y, color);
+
+        // Sides
+        for (let row = 1; row < height - 1; row++) {
+          this.drawChar(c.v, x, y + row, color);
+          this.drawChar(c.v, x + width - 1, y + row, color);
+        }
+
+        // Bottom border
+        this.drawChar(c.bl, x, y + height - 1, color);
+        for (let col = 1; col < width - 1; col++) {
+          this.drawChar(c.h, x + col, y + height - 1, color);
+        }
+        this.drawChar(c.br, x + width - 1, y + height - 1, color);
+
+        // Draw text inside
+        if (obj.text) {
+          const textY = y + Math.floor(height / 2);
+          let textX = x + 1;
+
+          if (obj.textAlign === 'center') {
+            textX = x + Math.floor((width - obj.text.length) / 2);
+          } else if (obj.textAlign === 'right') {
+            textX = x + width - obj.text.length - 1;
+          }
+
+          this.drawText(obj.text, textX, textY, color);
+        }
+      }
+
+      drawObject(obj) {
+        switch (obj.type) {
+          case 'box':
+            this.drawBox(obj);
+            break;
+          case 'text':
+            this.drawText(obj.text || '', obj.x, obj.y);
+            break;
+          // Add more object types as we implement them
+          default:
+            // Placeholder for unimplemented types
+            this.drawBox({ ...obj, width: obj.width || 10, height: obj.height || 3 });
+        }
+      }
+
+      render(state, toolManager) {
+        this.clear();
+
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        // Draw grid
+        this.drawGrid(page.width, page.height, state.ui.gridVisible);
+
+        // Draw all objects
+        page.objects.forEach(obj => {
+          this.drawObject(obj);
+        });
+
+        // Draw tool overlay
+        toolManager.renderOverlay(this.ctx);
+      }
+    }
+
+    // ============================================================
+    // INITIAL STATE
+    // ============================================================
+
+    function createInitialState() {
+      return {
+        project: {
+          meta: {
+            name: 'Untitled',
+            version: '1.0',
+            created: new Date().toISOString(),
+            modified: new Date().toISOString()
+          },
+          settings: {
+            charWidth: 10,
+            charHeight: 20,
+            defaultPageWidth: 120,
+            defaultPageHeight: 60,
+            font: 'BerkeleyMono',
+            fontSize: 16
+          },
+          parameters: {
+            PROJECT_NAME: 'Untitled Project',
+            AUTHOR: '',
+            COMPANY: '',
+            REVISION: '1.0',
+            DATE: new Date().toISOString().split('T')[0]
+          },
+          pages: [
+            {
+              id: 'page-1',
+              name: 'Main',
+              width: 120,
+              height: 60,
+              parameters: {},
+              objects: []
+            }
+          ],
+          interfaces: [],
+          nets: []
+        },
+        activePageId: 'page-1',
+        viewState: {
+          'page-1': { zoom: 1.0, panX: 0, panY: 0 }
+        },
+        selection: {
+          ids: [],
+          handles: null
+        },
+        activeTool: 'select',
+        toolState: {},
+        clipboard: {
+          sourcePageId: null,
+          objects: []
+        },
+        ui: {
+          sidebarVisible: true,
+          propertiesPanelVisible: true,
+          pageListVisible: true,
+          gridVisible: true,
+          viewMode: 'single'
+        },
+        gridLayout: {
+          columns: 3,
+          pageSpacing: 20,
+          zoom: 0.3,
+          panX: 0,
+          panY: 0
+        },
+        navigationStack: []
+      };
+    }
+
+    // ============================================================
+    // APPLICATION
+    // ============================================================
+
+    class Application {
+      constructor() {
+        this.canvas = document.getElementById('editor-canvas');
+        this.history = new HistoryManager(createInitialState());
+        this.grid = null;
+        this.renderer = null;
+        this.toolManager = new ToolManager();
+        this.hotkeyManager = new HotkeyManager();
+
+        this.init();
+      }
+
+      async init() {
+        // Measure font and set up grid
+        await this.setupFont();
+
+        // Set up renderer
+        this.renderer = new Renderer(this.canvas, this.grid);
+        await this.renderer.loadFont();
+
+        // Set up canvas size
+        const state = this.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        this.updateCanvasSize(page);
+
+        // Set up tools
+        this.setupTools();
+
+        // Set up hotkeys
+        this.setupHotkeys();
+
+        // Set up event listeners
+        this.setupEventListeners();
+
+        // Subscribe to state changes
+        this.history.subscribe(() => this.render());
+
+        // Initial render
+        this.render();
+        this.updateUI();
+        this.renderPageTabs();
+
+        console.log('ASCII Diagram Editor initialized');
+      }
+
+      async setupFont() {
+        // Try to load font and measure
+        try {
+          await document.fonts.load('16px BerkeleyMono');
+        } catch (e) {
+          console.warn('BerkeleyMono not loaded, using fallback measurements');
+        }
+
+        // Measure character dimensions
+        const measureCanvas = document.createElement('canvas');
+        const measureCtx = measureCanvas.getContext('2d');
+        measureCtx.font = '16px BerkeleyMono, monospace';
+
+        const metrics = measureCtx.measureText('M');
+        const charWidth = Math.ceil(metrics.width);
+        const charHeight = 20; // Approximate line height
+
+        this.grid = new CharacterGrid(charWidth, charHeight);
+
+        console.log(`Character dimensions: ${charWidth}x${charHeight}`);
+      }
+
+      updateCanvasSize(page) {
+        if (!page || !this.grid) return;
+        const width = page.width * this.grid.charWidth;
+        const height = page.height * this.grid.charHeight;
+        this.renderer.setCanvasSize(width, height);
+      }
+
+      setupTools() {
+        // Register tools
+        this.toolManager.register(new SelectTool());
+        this.toolManager.register(new BoxTool());
+        // Add more tools as we implement them
+
+        // Set context
+        this.toolManager.setContext({
+          canvas: this.canvas,
+          grid: this.grid,
+          history: this.history
+        });
+
+        // Activate default tool
+        this.toolManager.activate('select');
+      }
+
+      setupHotkeys() {
+        const hk = this.hotkeyManager;
+
+        // Undo/Redo
+        hk.register('ctrl+z', () => this.history.undo());
+        hk.register('ctrl+y', () => this.history.redo());
+        hk.register('ctrl+shift+z', () => this.history.redo());
+
+        // Tools
+        hk.register('v', () => this.setTool('select'));
+        hk.register('b', () => this.setTool('box'));
+        hk.register('t', () => this.setTool('text'));
+        hk.register('l', () => this.setTool('line'));
+        hk.register('s', () => this.setTool('symbol'));
+        hk.register('w', () => this.setTool('wire'));
+        hk.register('p', () => this.setTool('port'));
+        hk.register('o', () => this.setTool('power'));
+
+        // View
+        hk.register('g', () => this.toggleGrid());
+
+        // File operations
+        hk.register('ctrl+s', () => this.saveProject());
+        hk.register('ctrl+e', () => this.exportASCII());
+
+        // Escape
+        hk.register('escape', () => {
+          this.history.updateState(s => ({
+            ...s,
+            selection: { ids: [], handles: null }
+          }));
+          this.setTool('select');
+        });
+      }
+
+      setupEventListeners() {
+        // Canvas mouse events
+        this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+        this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        this.canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+        this.canvas.addEventListener('dblclick', (e) => this.handleDoubleClick(e));
+
+        // Keyboard events
+        document.addEventListener('keydown', (e) => this.handleKeyDown(e));
+        document.addEventListener('keyup', (e) => this.handleKeyUp(e));
+
+        // Toolbar buttons
+        document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            this.setTool(btn.dataset.tool);
+          });
+        });
+
+        document.getElementById('btn-undo').addEventListener('click', () => this.history.undo());
+        document.getElementById('btn-redo').addEventListener('click', () => this.history.redo());
+        document.getElementById('btn-grid').addEventListener('click', () => this.toggleGrid());
+        document.getElementById('btn-save').addEventListener('click', () => this.saveProject());
+        document.getElementById('btn-load').addEventListener('click', () => this.loadProject());
+        document.getElementById('btn-export').addEventListener('click', () => this.exportASCII());
+
+        // Window resize
+        window.addEventListener('resize', () => this.render());
+      }
+
+      handleMouseDown(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const event = {
+          canvasX: e.clientX - rect.left,
+          canvasY: e.clientY - rect.top,
+          button: e.button,
+          shiftKey: e.shiftKey,
+          ctrlKey: e.ctrlKey,
+          altKey: e.altKey
+        };
+
+        if (this.toolManager.onMouseDown(event)) {
+          this.render();
+        }
+      }
+
+      handleMouseMove(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const event = {
+          canvasX: e.clientX - rect.left,
+          canvasY: e.clientY - rect.top,
+          button: e.button,
+          shiftKey: e.shiftKey,
+          ctrlKey: e.ctrlKey,
+          altKey: e.altKey
+        };
+
+        // Update status bar position
+        const { col, row } = this.grid.pixelToChar(event.canvasX, event.canvasY);
+        document.getElementById('status-position').textContent = `Col: ${col}, Row: ${row}`;
+
+        if (this.toolManager.onMouseMove(event)) {
+          this.render();
+        }
+      }
+
+      handleMouseUp(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const event = {
+          canvasX: e.clientX - rect.left,
+          canvasY: e.clientY - rect.top,
+          button: e.button,
+          shiftKey: e.shiftKey,
+          ctrlKey: e.ctrlKey,
+          altKey: e.altKey
+        };
+
+        if (this.toolManager.onMouseUp(event)) {
+          this.render();
+        }
+      }
+
+      handleDoubleClick(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const event = {
+          canvasX: e.clientX - rect.left,
+          canvasY: e.clientY - rect.top
+        };
+
+        if (this.toolManager.onDoubleClick(event)) {
+          this.render();
+        }
+      }
+
+      handleKeyDown(e) {
+        // First try hotkey manager
+        if (this.hotkeyManager.handleKeyDown(e)) {
+          this.render();
+          this.updateUI();
+          return;
+        }
+
+        // Then try active tool
+        if (this.toolManager.onKeyDown(e)) {
+          this.render();
+        }
+      }
+
+      handleKeyUp(e) {
+        if (this.toolManager.onKeyUp(e)) {
+          this.render();
+        }
+      }
+
+      setTool(toolName) {
+        if (this.toolManager.activate(toolName)) {
+          this.history.updateState(s => ({ ...s, activeTool: toolName }));
+          this.updateUI();
+        }
+      }
+
+      toggleGrid() {
+        this.history.updateState(s => ({
+          ...s,
+          ui: { ...s.ui, gridVisible: !s.ui.gridVisible }
+        }));
+      }
+
+      render() {
+        const state = this.history.getState();
+        this.renderer.render(state, this.toolManager);
+      }
+
+      updateUI() {
+        const state = this.history.getState();
+
+        // Update tool buttons
+        document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.tool === state.activeTool);
+        });
+
+        // Update status bar
+        document.getElementById('status-tool').textContent = `Tool: ${state.activeTool}`;
+        document.getElementById('status-selection').textContent = `Selected: ${state.selection.ids.length}`;
+        document.getElementById('status-history').textContent =
+          `History: ${this.history.undoStack.length}/${this.history.undoStack.length + this.history.redoStack.length}`;
+
+        const pageIndex = state.project.pages.findIndex(p => p.id === state.activePageId);
+        document.getElementById('status-page').textContent =
+          `Page: ${pageIndex + 1}/${state.project.pages.length}`;
+      }
+
+      renderPageTabs() {
+        const state = this.history.getState();
+        const container = document.getElementById('page-tabs');
+        container.innerHTML = '';
+
+        state.project.pages.forEach((page, index) => {
+          const tab = document.createElement('button');
+          tab.className = 'page-tab' + (page.id === state.activePageId ? ' active' : '');
+          tab.textContent = page.name;
+          tab.addEventListener('click', () => this.switchPage(page.id));
+          container.appendChild(tab);
+        });
+
+        // Add "+" button
+        const addBtn = document.createElement('button');
+        addBtn.className = 'page-tab-add';
+        addBtn.textContent = '+';
+        addBtn.addEventListener('click', () => this.addPage());
+        container.appendChild(addBtn);
+      }
+
+      switchPage(pageId) {
+        this.history.updateState(s => ({
+          ...s,
+          activePageId: pageId,
+          selection: { ids: [], handles: null }
+        }));
+
+        const state = this.history.getState();
+        const page = state.project.pages.find(p => p.id === pageId);
+        this.updateCanvasSize(page);
+        this.renderPageTabs();
+        this.updateUI();
+      }
+
+      addPage() {
+        const state = this.history.getState();
+        const newPage = {
+          id: generateId(),
+          name: `Page ${state.project.pages.length + 1}`,
+          width: state.project.settings.defaultPageWidth,
+          height: state.project.settings.defaultPageHeight,
+          parameters: {},
+          objects: []
+        };
+
+        this.history.updateState(s => ({
+          ...s,
+          project: {
+            ...s.project,
+            pages: [...s.project.pages, newPage]
+          },
+          activePageId: newPage.id,
+          viewState: {
+            ...s.viewState,
+            [newPage.id]: { zoom: 1.0, panX: 0, panY: 0 }
+          }
+        }));
+
+        this.updateCanvasSize(newPage);
+        this.renderPageTabs();
+        this.updateUI();
+      }
+
+      saveProject() {
+        const state = this.history.getState();
+        const json = JSON.stringify(state.project, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = (state.project.meta.name || 'diagram') + '.json';
+        a.click();
+
+        URL.revokeObjectURL(url);
+        console.log('Project saved');
+      }
+
+      loadProject() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const project = JSON.parse(e.target.result);
+              this.history.updateState(s => ({
+                ...s,
+                project,
+                activePageId: project.pages[0]?.id || 'page-1',
+                selection: { ids: [], handles: null }
+              }));
+
+              const state = this.history.getState();
+              const page = state.project.pages.find(p => p.id === state.activePageId);
+              this.updateCanvasSize(page);
+              this.renderPageTabs();
+              this.updateUI();
+              console.log('Project loaded');
+            } catch (err) {
+              console.error('Failed to load project:', err);
+              alert('Failed to load project file');
+            }
+          };
+          reader.readAsText(file);
+        };
+        input.click();
+      }
+
+      exportASCII() {
+        const state = this.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+        if (!page) return;
+
+        // Create a 2D character buffer
+        const buffer = [];
+        for (let r = 0; r < page.height; r++) {
+          buffer.push(new Array(page.width).fill(' '));
+        }
+
+        // Render objects to buffer
+        page.objects.forEach(obj => {
+          this.renderObjectToBuffer(buffer, obj);
+        });
+
+        // Convert buffer to string
+        const ascii = buffer.map(row => row.join('')).join('\n');
+
+        // Download
+        const blob = new Blob([ascii], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = (page.name || 'diagram') + '.txt';
+        a.click();
+
+        URL.revokeObjectURL(url);
+        console.log('ASCII exported');
+      }
+
+      renderObjectToBuffer(buffer, obj) {
+        if (obj.type === 'box') {
+          this.renderBoxToBuffer(buffer, obj);
+        }
+        // Add more object types as implemented
+      }
+
+      renderBoxToBuffer(buffer, obj) {
+        const { x, y, width, height, style, text } = obj;
+
+        const chars = {
+          single: { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' },
+          double: { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' },
+          rounded: { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' }
+        };
+
+        const c = chars[style] || chars.single;
+
+        // Bounds checking helper
+        const setChar = (col, row, char) => {
+          if (row >= 0 && row < buffer.length && col >= 0 && col < buffer[0].length) {
+            buffer[row][col] = char;
+          }
+        };
+
+        // Top border
+        setChar(x, y, c.tl);
+        for (let col = 1; col < width - 1; col++) {
+          setChar(x + col, y, c.h);
+        }
+        setChar(x + width - 1, y, c.tr);
+
+        // Sides
+        for (let row = 1; row < height - 1; row++) {
+          setChar(x, y + row, c.v);
+          setChar(x + width - 1, y + row, c.v);
+        }
+
+        // Bottom border
+        setChar(x, y + height - 1, c.bl);
+        for (let col = 1; col < width - 1; col++) {
+          setChar(x + col, y + height - 1, c.h);
+        }
+        setChar(x + width - 1, y + height - 1, c.br);
+
+        // Text inside
+        if (text) {
+          const textY = y + Math.floor(height / 2);
+          let textX = x + 1;
+
+          if (obj.textAlign === 'center') {
+            textX = x + Math.floor((width - text.length) / 2);
+          } else if (obj.textAlign === 'right') {
+            textX = x + width - text.length - 1;
+          }
+
+          for (let i = 0; i < text.length && textX + i < x + width - 1; i++) {
+            setChar(textX + i, textY, text[i]);
+          }
+        }
+      }
+    }
+
+    // ============================================================
+    // BOOTSTRAP
+    // ============================================================
+
+    const app = new Application();
+  </script>
+</body>
+</html>

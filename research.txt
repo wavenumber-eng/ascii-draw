@@ -1,0 +1,415 @@
+================================================================================
+ASCII DIAGRAM EDITOR - RESEARCH & IMPLEMENTATION PLAN
+================================================================================
+
+PART 1: EXISTING TOOLS ANALYSIS
+================================================================================
+
+1. ASCIIFLOW (asciiflow.com)
+   - GitHub: https://github.com/lewish/asciiflow
+   - Tech: TypeScript (89%), Bazel build system
+   - Architecture: Client-side web app, modular (client/common/electron/vscode)
+   - Features: Infinite canvas, Google Drive save, freeform draw, text/HTML export
+   - Pros: Open source, mature, supports Unicode box-drawing
+   - Cons: Complex build system (Bazel), no shadow effects, no schematic features
+   - Verdict: Could study implementation, but too complex to fork easily
+
+2. MONODRAW (macOS only - $9.99)
+   - URL: https://monodraw.helftone.com/
+   - Features: Boxes with shadows, FIGlet text, ER diagrams, attachment points
+   - Shadow implementation: Uses ASCII characters for shadow effect
+   - Pros: Closest to our vision, shadows, line attachments
+   - Cons: macOS only, proprietary, can't use as base
+   - Verdict: Excellent reference for features/UX, but can't use code
+
+3. DIAGON
+   - GitHub: https://github.com/ArthurSonzogni/Diagon
+   - Tech: C++ compiled to WebAssembly, ANTLR parser
+   - Features: Math expressions, sequence diagrams, trees, flowcharts
+   - Approach: Text-to-diagram (not visual editor)
+   - Verdict: Different paradigm - generates from text, not visual editor
+
+4. TEXTIK (textik.com)
+   - Simple ASCII-only web editor
+   - Verdict: Too basic, ASCII-only (no Unicode box-drawing)
+
+5. EXCALIDRAW
+   - Tech: React, two-canvas architecture (static + interactive)
+   - Features: Hand-drawn style, JSON export, infinite canvas
+   - Architecture: Separates static rendering from interactive overlays
+   - Verdict: Good architectural reference, but outputs graphics not ASCII
+
+
+PART 2: TECHNOLOGY OPTIONS
+================================================================================
+
+OPTION A: Single HTML + Vanilla JavaScript
+--------------------------------------------------------------------------
+Pros:
+  - Zero dependencies, runs anywhere
+  - Easy to distribute (one file)
+  - No build system needed
+  - Works offline
+
+Cons:
+  - More verbose code
+  - Manual state management
+  - No component abstractions
+
+Complexity: Medium
+Deployment: Excellent (just open HTML file)
+Recommended: YES - for initial prototype
+
+--------------------------------------------------------------------------
+
+OPTION B: Single HTML + Fabric.js
+--------------------------------------------------------------------------
+Pros:
+  - Mature canvas library with object model
+  - Built-in selection, transforms, serialization
+  - SVG export capability
+  - Can load from CDN (single HTML still possible)
+
+Cons:
+  - Designed for graphics, not text/ASCII
+  - May fight against the library for text rendering
+  - ~300KB library size
+
+Complexity: Medium
+Deployment: Good (single HTML with CDN link)
+Recommended: MAYBE - if we need advanced transforms
+
+--------------------------------------------------------------------------
+
+OPTION C: Single HTML + Lit/Web Components
+--------------------------------------------------------------------------
+Pros:
+  - Clean component model (~5KB)
+  - Reactive properties
+  - Standard web components
+
+Cons:
+  - Still need canvas for drawing
+  - Adds abstraction layer
+  - Requires understanding Web Components
+
+Complexity: Medium-High
+Deployment: Good (can bundle to single file)
+Recommended: NO - overkill for this project
+
+--------------------------------------------------------------------------
+
+OPTION D: Python + Tkinter
+--------------------------------------------------------------------------
+Pros:
+  - Comes with Python (no pip install)
+  - Canvas widget built-in
+  - Cross-platform
+
+Cons:
+  - Requires Python installed
+  - Tkinter looks dated
+  - Harder to share than HTML
+
+Complexity: Medium
+Deployment: Fair (requires Python)
+Recommended: NO - HTML is more portable
+
+--------------------------------------------------------------------------
+
+OPTION E: TypeScript + Build System (like ASCIIFlow)
+--------------------------------------------------------------------------
+Pros:
+  - Type safety
+  - Better tooling
+  - Modular architecture
+
+Cons:
+  - Complex setup
+  - Build step required
+  - Harder to distribute
+
+Complexity: High
+Deployment: Poor for simple distribution
+Recommended: NO - too complex for goal
+
+--------------------------------------------------------------------------
+
+RECOMMENDATION: Option A (Single HTML + Vanilla JS)
+  - Start with pure HTML/CSS/JavaScript
+  - Can always add libraries later if needed
+  - Meets deployment goal perfectly
+  - Easy to understand and modify
+
+
+PART 3: CORE ARCHITECTURE
+================================================================================
+
+DATA MODEL (JSON)
+-----------------
+{
+  "version": "1.0",
+  "canvas": { "width": 200, "height": 100 },
+  "objects": [
+    {
+      "id": "box-1",
+      "type": "box",
+      "x": 10, "y": 5,
+      "width": 20, "height": 8,
+      "text": "My Box",
+      "textAlign": "center",
+      "shadow": true,
+      "style": "single"  // single, double, rounded
+    },
+    {
+      "id": "text-1",
+      "type": "text",
+      "x": 40, "y": 3,
+      "text": "Label"
+    },
+    {
+      "id": "line-1",
+      "type": "line",
+      "points": [[30, 9], [40, 9], [40, 15]],
+      "arrows": "end",
+      "label": "VCC"
+    },
+    {
+      "id": "symbol-1",
+      "type": "symbol",
+      "x": 50, "y": 10,
+      "width": 15, "height": 10,
+      "text": "MCU",
+      "designator": "U1",
+      "value": "STM32F4",
+      "pins": [
+        { "name": "VCC", "number": "1", "side": "left", "position": 1 },
+        { "name": "GND", "number": "2", "side": "left", "position": 2 },
+        { "name": "TX",  "number": "3", "side": "right", "position": 1 },
+        { "name": "RX",  "number": "4", "side": "right", "position": 2 }
+      ]
+    },
+    {
+      "id": "port-1",
+      "type": "port",
+      "x": 5, "y": 12,
+      "name": "VIN",
+      "direction": "in"  // in, out, bidirectional
+    }
+  ],
+  "connections": [
+    { "from": "symbol-1.pin.1", "to": "port-1", "wire": "line-1" }
+  ]
+}
+
+
+RENDERING LAYERS
+----------------
+1. Grid layer (optional, for alignment)
+2. Shadow layer (rendered first, offset)
+3. Object layer (boxes, lines, text)
+4. Selection/handle layer (interactive)
+
+
+UNICODE CHARACTERS REFERENCE
+----------------------------
+Box Drawing (U+2500-257F):
+  Single:  ─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼
+  Double:  ═ ║ ╔ ╗ ╚ ╝ ╠ ╣ ╦ ╩ ╬
+  Rounded: ╭ ╮ ╯ ╰
+
+Arrows:
+  Simple:  ← → ↑ ↓ ↔ ↕
+  Fancy:   ◀ ▶ ▲ ▼ ◁ ▷ △ ▽
+  Lines:   ╱ ╲ ╳
+
+Block Elements (for shadows):
+  ░ Light shade
+  ▒ Medium shade
+  ▓ Dark shade
+  █ Full block
+
+  Half blocks: ▀ ▄ ▌ ▐
+
+  Dots (from Braille): ⠁ ⠂ ⠄ ⡀ ⢀ ⠈ ⠐ ⠠
+
+Recommended shadow: ░ or custom dot pattern like :::
+
+
+PART 4: IMPLEMENTATION PLAN
+================================================================================
+
+PHASE 1: Foundation (Core Editor)
+---------------------------------
+[ ] Set up single HTML file structure
+[ ] Implement canvas with Berkeley Mono font
+[ ] Create ASCII grid system (character cells)
+[ ] Build basic rendering engine (grid -> text)
+[ ] Implement pan/zoom on canvas
+
+Deliverable: Empty editor with grid and font rendering
+
+PHASE 2: Basic Objects
+---------------------------------
+[ ] Implement Box object
+    - Draw box with Unicode borders
+    - Resize handles (corners)
+    - Text inside with justification
+    - Multiple border styles (single, double, rounded)
+[ ] Implement shadow effect for boxes
+[ ] Implement free-floating Text object
+[ ] Object selection and movement
+
+Deliverable: Can create/edit boxes and text
+
+PHASE 3: Lines & Connectors
+---------------------------------
+[ ] Implement Line object
+    - Horizontal, vertical, angled segments
+    - Arrow heads
+[ ] Implement connection points on boxes
+[ ] Auto-routing when boxes move
+[ ] Line labels (for wire names)
+
+Deliverable: Can draw connected diagrams
+
+PHASE 4: Schematic Features
+---------------------------------
+[ ] Implement Symbol object (box with pins)
+    - Pin definition (name, number, side)
+    - Designator and value fields
+[ ] Implement Port object
+[ ] Wire connections between pins
+[ ] Net label display
+
+Deliverable: Can create schematic-style diagrams
+
+PHASE 5: Serialization & Export
+---------------------------------
+[ ] JSON save/load (project files)
+[ ] ASCII text export
+[ ] SVG export (stretch goal)
+[ ] Copy to clipboard
+
+Deliverable: Full save/load/export functionality
+
+PHASE 6: Polish
+---------------------------------
+[ ] Undo/redo system
+[ ] Keyboard shortcuts
+[ ] Object alignment helpers
+[ ] Grid snapping
+[ ] UI polish (toolbars, panels)
+
+Deliverable: Production-ready editor
+
+
+PART 5: FILE STRUCTURE
+================================================================================
+
+Option A - True Single File:
+  ascii_editor.html        (everything inline)
+
+Option B - Organized (still simple):
+  index.html               (main file, loads others)
+  style.css                (optional, can inline)
+  editor.js                (main logic)
+  BerkeleyMono-Regular.woff2
+
+For initial development, recommend Option B, then can bundle to single
+file if needed for distribution.
+
+
+PART 6: TECHNICAL NOTES
+================================================================================
+
+RENDERING APPROACH
+------------------
+Two viable approaches:
+
+A) DOM-based rendering:
+   - Use <pre> or grid of <span> elements
+   - Each character is a DOM element
+   - Pros: Simple selection, easy styling
+   - Cons: Slow for large diagrams
+
+B) Canvas-based rendering:
+   - Draw text on HTML5 canvas
+   - Virtual grid mapped to pixels
+   - Pros: Fast, flexible
+   - Cons: Need custom hit testing, selection
+
+Recommendation: Canvas-based for performance, with proper hit testing
+
+COORDINATE SYSTEM
+-----------------
+- Work in character coordinates (col, row)
+- Each cell = one monospace character
+- Berkeley Mono: need to measure exact character dimensions
+- Transform between character coords and pixel coords
+
+FONT HANDLING
+-------------
+- Load Berkeley Mono via @font-face
+- Measure character width/height precisely
+- Ensure consistent rendering across browsers
+- Fallback to system monospace if needed
+
+SHADOW IMPLEMENTATION
+---------------------
+- Offset shadow by (+1, +1) character cells
+- Use ░ or dot pattern characters
+- Render shadow layer first, then object layer
+- Shadow follows object shape
+
+
+PART 7: RISK ASSESSMENT
+================================================================================
+
+Low Risk:
+  - Basic box/text rendering
+  - JSON serialization
+  - File save/load
+
+Medium Risk:
+  - Auto-routing lines (pathfinding needed)
+  - Hit testing for selection
+  - Pin/symbol implementation
+
+Higher Risk:
+  - Complex line routing around obstacles
+  - Performance with many objects
+  - Cross-browser font rendering consistency
+
+
+PART 8: REFERENCES & RESOURCES
+================================================================================
+
+ASCIIFlow Source:      https://github.com/lewish/asciiflow
+Monodraw:              https://monodraw.helftone.com/
+Diagon:                https://github.com/ArthurSonzogni/Diagon
+Fabric.js:             https://fabricjs.com/
+Excalidraw:            https://github.com/excalidraw/excalidraw
+
+Unicode Box Drawing:   https://en.wikipedia.org/wiki/Box-drawing_characters
+Block Elements:        http://xahlee.info/comp/unicode_drawing_shapes.html
+Box Drawing Range:     https://unicode.org/charts/PDF/U2500.pdf
+
+
+================================================================================
+CONCLUSION
+================================================================================
+
+Recommended Approach:
+  - Single HTML file with vanilla JavaScript
+  - Canvas-based rendering with Berkeley Mono font
+  - Character-grid coordinate system
+  - JSON data model for all objects
+  - Phased implementation starting with basic boxes
+
+This approach balances simplicity, portability, and capability while meeting
+all stated requirements. The architecture allows for future enhancement
+without requiring fundamental changes.
+
+Ready to proceed when you are!
+================================================================================
