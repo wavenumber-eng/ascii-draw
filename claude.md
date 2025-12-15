@@ -17,3 +17,9 @@ Example bad commits:
 - "🎉 Add awesome new feature!"
 - "Generated with Claude Code"
 - "AI-assisted implementation of..."
+
+## UI Style Guidelines
+
+- **Sharp corners only** - always use border-radius: 0, no rounded corners anywhere
+- Use Berkeley Mono font throughout the UI
+- Dark theme with accent color #007acc
