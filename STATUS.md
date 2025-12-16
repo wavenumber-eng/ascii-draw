@@ -27,14 +27,17 @@ The core architecture and basic tools are implemented. The application runs as a
 - Move selected objects (single or multi-select)
 - Resize via corner handles (single selection only)
 - Delete key removes selected objects
+- Double-click to edit box text inline
+- Type-to-edit: typing with single selection starts inline editing
 
 #### BoxTool (B)
 - Click and drag to create boxes
 - Minimum size 3x3
 - Preview shows dimensions while drawing
-- Box styles: single, double, rounded (stored, not yet UI-selectable)
-- Shadow support (stored, not yet UI-selectable)
-- Text alignment: left, center, right (stored, not yet UI-selectable)
+- Box styles: single, double, rounded (selectable via Properties Panel)
+- Shadow support (toggle via Properties Panel)
+- 9-position text justification (selectable via Properties Panel)
+- Title support with position (top/bottom, left/center/right) and mode (border/inside/outside)
 
 ### Rendering
 - Canvas-based rendering with Berkeley Mono font
@@ -42,6 +45,7 @@ The core architecture and basic tools are implemented. The application runs as a
 - Grid overlay (toggle with G key)
 - Shadow rendering with ░ character
 - All colors via CSS variables for theming
+- Inline text editing with blinking cursor rendered on canvas
 
 ### File Operations
 - Save project as JSON (Ctrl+S)
@@ -53,7 +57,16 @@ The core architecture and basic tools are implemented. The application runs as a
 - Sharp corners (border-radius: 0) everywhere
 - Toolbar with tool buttons and keyboard hints
 - Page tabs with add button
-- Status bar showing: tool, position, selection count, history, page
+- Status bar showing: tool, position, selection count, zoom, history, page
+
+### Properties Panel
+- Single selection: Full property editing for selected object
+- Multi-selection: Common property editing with mixed value indicators
+  - Shows "..." placeholder when values differ across selection
+  - Visual styling (border color, italic) for mixed state
+  - Checkbox indeterminate state for boolean properties
+- Editable properties: position, size, style, shadow, title, title position, title mode, text justify, text
+- Per-object undo support for batch operations
 
 ## Not Yet Implemented
 
@@ -67,24 +80,19 @@ The core architecture and basic tools are implemented. The application runs as a
 
 ### Features from Requirements
 - Sticky connectors (auto-reroute when boxes move)
-- Text editing (double-click to edit box text)
-- Property panel for object attributes
-- Object parameters (key-value metadata)
-- Project parameters and text substitution
+- Object parameters (arbitrary key-value metadata)
+- Project parameters and text substitution (${PARAM_NAME})
 - Interfaces/buses (signal bundles)
 - Hierarchical blocks (sheet symbols)
-- Grid view mode (see multiple pages)
+- Grid view mode (see multiple pages side-by-side)
 - ANSI terminal export
 - HTML export
 - SVG export
 - Copy/paste
 
 ### UI Improvements Needed
-- Box style selector (single/double/rounded)
-- Shadow toggle
-- Text alignment controls
-- Property panel sidebar
-- Context menus
+- Context menus (right-click)
+- Alignment tools for multi-selection
 
 ## File Structure
 
@@ -153,11 +161,11 @@ ascii_draw/
 ## Next Steps (Suggested Priority)
 
 1. **TextTool**: Add free-floating text objects
-2. **Text editing**: Double-click boxes to edit text
-3. **LineTool**: Horizontal/vertical lines with arrow heads
-4. **Property panel**: Edit object properties (style, shadow, text align)
-5. **Copy/paste**: Clipboard operations
-6. **SymbolTool**: Pin boxes for schematic mode
+2. **LineTool**: Horizontal/vertical lines with arrow heads
+3. **Copy/paste**: Clipboard operations
+4. **SymbolTool**: Pin boxes for schematic mode
+5. **WireTool**: Lines with net labels
+6. **Context menus**: Right-click operations
 
 ## Repository
 

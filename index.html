@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASCII Diagram Editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <button class="tool-btn active" data-tool="select" title="Select (V)">
+      <span>Select</span>
+      <kbd>V</kbd>
+    </button>
+    <button class="tool-btn" data-tool="box" title="Box (B)">
+      <span>Box</span>
+      <kbd>B</kbd>
+    </button>
+    <button class="tool-btn" data-tool="text" title="Text (T)">
+      <span>Text</span>
+      <kbd>T</kbd>
+    </button>
+    <button class="tool-btn" data-tool="line" title="Line (L)">
+      <span>Line</span>
+      <kbd>L</kbd>
+    </button>
+
+    <div class="tool-separator"></div>
+
+    <button class="tool-btn" data-tool="symbol" title="Symbol (S)">
+      <span>Symbol</span>
+      <kbd>S</kbd>
+    </button>
+    <button class="tool-btn" data-tool="wire" title="Wire (W)">
+      <span>Wire</span>
+      <kbd>W</kbd>
+    </button>
+    <button class="tool-btn" data-tool="port" title="Port (P)">
+      <span>Port</span>
+      <kbd>P</kbd>
+    </button>
+    <button class="tool-btn" data-tool="power" title="Power (O)">
+      <span>Power</span>
+      <kbd>O</kbd>
+    </button>
+
+    <div class="toolbar-spacer"></div>
+
+    <button class="tool-btn" id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button class="tool-btn" id="btn-redo" title="Redo (Ctrl+Y)">Redo</button>
+
+    <div class="tool-separator"></div>
+
+    <button class="tool-btn" id="btn-grid" title="Toggle Grid (G)">Grid</button>
+    <button class="tool-btn" id="btn-export" title="Export ASCII (Ctrl+E)">Export</button>
+    <button class="tool-btn" id="btn-save" title="Save (Ctrl+S)">Save</button>
+    <button class="tool-btn" id="btn-load" title="Load">Load</button>
+  </div>
+
+  <!-- Main Content -->
+  <div id="main-content">
+    <div id="canvas-container">
+      <div id="canvas-wrapper">
+        <canvas id="editor-canvas"></canvas>
+        <!-- Inline text editor overlay -->
+        <textarea id="inline-editor" spellcheck="false"></textarea>
+      </div>
+      <div id="page-tabs">
+        <!-- Tabs populated by JS -->
+      </div>
+    </div>
+
+    <!-- Properties Panel -->
+    <div id="properties-panel">
+      <div class="panel-header">Properties</div>
+      <div id="properties-content">
+        <div class="property-empty">No selection</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div id="status-bar">
+    <span class="status-item" id="status-tool">Tool: Select</span>
+    <span class="status-item" id="status-position">Col: 0, Row: 0</span>
+    <span class="status-item" id="status-selection">Selected: 0</span>
+    <span class="status-item" id="status-zoom">Zoom: 100%</span>
+    <span class="status-item" id="status-page">Page: 1/1</span>
+    <div style="flex:1"></div>
+    <span class="status-item" id="status-history">History: 0/0</span>
+  </div>
+
+  <!-- Core modules (no dependencies) -->
+  <script src="js/core/utils.js"></script>
+  <script src="js/core/CharacterGrid.js"></script>
+  <script src="js/core/Command.js"></script>
+  <script src="js/core/HistoryManager.js"></script>
+  <script src="js/core/State.js"></script>
+  <script src="js/core/HotkeyManager.js"></script>
+
+  <!-- Tools (depends on core) -->
+  <script src="js/tools/Tool.js"></script>
+  <script src="js/tools/ToolManager.js"></script>
+  <script src="js/tools/SelectTool.js"></script>
+  <script src="js/tools/BoxTool.js"></script>
+
+  <!-- Rendering (depends on core) -->
+  <script src="js/rendering/Renderer.js"></script>
+
+  <!-- Main application (depends on everything) -->
+  <script src="js/Editor.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
