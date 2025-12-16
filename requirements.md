@@ -202,50 +202,65 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 
 ### Multi-Select Property Editing
 
-The Properties Panel supports editing common properties across multiple selected objects.
+The Properties Panel supports editing common properties across multiple selected objects. When values differ, visual indicators show the mixed state and provide initialization from the first selected object.
 
 #### Property Value States
 
 - [x] **MSE-1**: Same value across selection: display normally (no indicator)
 - [x] **MSE-2**: Different values (mixed): display mixed indicator by type
-- [x] **MSE-3**: Mixed fields have `.mixed` CSS class for visual distinction
+- [x] **MSE-3**: Mixed fields have `.mixed` CSS class for visual distinction (colored border, italic text)
 
 #### Mixed State Indicators by Type
 
-- [ ] **MSE-10**: **Numbers** (X, Y, Width, Height): Range format `min...max`
-- [x] **MSE-11**: **Text** (Title, Content): Placeholder `...`
-- [x] **MSE-12**: **Boolean** (Shadow): Indeterminate checkbox `[■]`
-- [ ] **MSE-13**: **Enum/Select** (Style, Position, Mode): First value + asterisk `single*`
-- [ ] **MSE-14**: **Enum/Buttons** (Justify): First value with dashed border style
+| Status | ID | Type | Display Format | Example |
+|--------|-----|------|----------------|---------|
+| [ ] | **MSE-10** | Number | Range: `min...max` | `10...25` |
+| [x] | **MSE-11** | Text | Placeholder: `...` | `...` |
+| [x] | **MSE-12** | Boolean | Indeterminate checkbox | `[■]` |
+| [ ] | **MSE-13** | Enum (select) | First value + asterisk | `single*` |
+| [ ] | **MSE-14** | Enum (buttons) | Dashed border on first value's button | — |
 
-#### Initialize from First Object
+#### Initialize from First Object on Focus
 
-- [ ] **MSE-20**: Focus mixed number input: populate with min value, select all
-- [ ] **MSE-21**: Focus mixed text input: populate with first value, select all
-- [x] **MSE-22**: Click mixed checkbox: apply clicked state to all
-- [x] **MSE-23**: Select from mixed dropdown: apply to all
-- [x] **MSE-24**: Click mixed button grid: apply to all
+When user focuses a mixed field, auto-populate to enable quick editing:
+
+- [ ] **MSE-20**: Focus mixed **number** input → populate with **min value**, select all text
+- [ ] **MSE-21**: Focus mixed **text** input → populate with **first object's value**, select all text
+- [x] **MSE-22**: Click mixed **checkbox** → apply clicked state to all objects
+- [x] **MSE-23**: Select from mixed **dropdown** → apply selected value to all objects
+- [x] **MSE-24**: Click mixed **button grid** → apply clicked value to all objects
+
+#### Data Attributes for Mixed Fields
+
+- [ ] **MSE-25**: Number inputs store `data-min-value` and `data-first-value` attributes
+- [ ] **MSE-26**: Text inputs store `data-first-value` attribute
+- [ ] **MSE-27**: These attributes enable focus handlers to populate fields
 
 #### Batch Updates
 
 - [x] **MSE-30**: Property change applies to **all selected objects**
 - [x] **MSE-31**: Each object creates **separate undo command** (granular undo)
-- [x] **MSE-32**: Panel refreshes after batch update
+- [x] **MSE-32**: Panel refreshes after batch update to reflect new state
 
-#### Selection Order
+#### Selection Order & Value Computation
 
-- [x] **MSE-40**: First selected = first in selection ID array
-- [ ] **MSE-41**: Enum mixed state shows first object's value
-- [ ] **MSE-42**: Number range computed across all selected
+- [x] **MSE-40**: First selected = first in selection ID array (order preserved)
+- [ ] **MSE-41**: `getCommonPropertyValue()` returns `firstValue` from first object
+- [ ] **MSE-42**: `getCommonPropertyValue()` computes `minValue`/`maxValue` for numbers
+
+#### CSS Classes
+
+- [ ] **MSE-45**: `.mixed` class on inputs: colored border, italic placeholder
+- [ ] **MSE-46**: `.mixed-first` class on justify buttons: dashed border, accent color
 
 #### Supported Properties
 
 - [x] **MSE-50**: Multi-select editable properties:
-  - Position: X, Y (numbers)
-  - Size: Width, Height (numbers)
-  - Style: Border style (enum), Shadow (boolean)
-  - Title: Text (text), Position (enum), Mode (enum)
-  - Content: Justify (enum/buttons), Text (text)
+  - Position: X, Y (numbers) — range indicator, min-value focus
+  - Size: Width, Height (numbers) — range indicator, min-value focus
+  - Style: Border style (enum/select), Shadow (boolean/checkbox)
+  - Title: Text (text), Position (enum/select), Mode (enum/select)
+  - Content: Justify (enum/buttons), Text (textarea)
 
 ---
 
@@ -415,7 +430,7 @@ The Properties Panel supports editing common properties across multiple selected
 | Tools (TOOL) | 2 | 8 | 25% |
 | Objects (OBJ) | 15 | 55 | 27% |
 | Selection (SEL) | 20 | 20 | 100% |
-| Multi-Select Edit (MSE) | 12 | 18 | 67% |
+| Multi-Select Edit (MSE) | 13 | 25 | 52% |
 | User Interface (UI) | 18 | 18 | 100% |
 | Data Model (DATA) | 7 | 12 | 58% |
 | Export (EXP) | 2 | 12 | 17% |
@@ -423,7 +438,14 @@ The Properties Panel supports editing common properties across multiple selected
 
 ### Next Priority
 
-1. MSE-10, MSE-13, MSE-14, MSE-20, MSE-21 - Enhanced mixed state indicators
+1. **MSE enhancements** - Complete multi-select property editing:
+   - MSE-41, MSE-42: Enhance `getCommonPropertyValue()` with firstValue/min/max
+   - MSE-10: Number range placeholder `10...25`
+   - MSE-13: Enum select placeholder `single*`
+   - MSE-14, MSE-46: Justify button dashed border for mixed-first
+   - MSE-25, MSE-26, MSE-27: Data attributes for first/min values
+   - MSE-20, MSE-21: Focus handlers to populate from first/min
+   - MSE-45: CSS styling for mixed class
 2. TOOL-22 (TextTool) - Free-floating text objects
 3. TOOL-23 (LineTool) - Lines with arrows
 4. Copy/paste support
