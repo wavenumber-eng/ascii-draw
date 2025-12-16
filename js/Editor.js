@@ -1,14 +1,22 @@
 /**
  * Editor - Main application orchestrator
- * Implements: UI-*, DATA-40 to DATA-42, EXP-1 to EXP-3
+ * Implements: UI-*, DATA-40 to DATA-42, DATA-50 to DATA-52, EXP-1 to EXP-3
  */
 
 var AsciiEditor = AsciiEditor || {};
 
+// DATA-50: localStorage key for auto-save
+AsciiEditor.STORAGE_KEY = 'ascii_editor_autosave';
+
 AsciiEditor.Editor = class Editor {
   constructor() {
     this.canvas = document.getElementById('editor-canvas');
-    this.history = new AsciiEditor.core.HistoryManager(AsciiEditor.core.createInitialState());
+
+    // DATA-51: Try to restore from localStorage, otherwise create fresh state
+    const savedState = this.loadFromStorage();
+    const initialState = savedState || AsciiEditor.core.createInitialState();
+    this.history = new AsciiEditor.core.HistoryManager(initialState);
+
     this.grid = null;
     this.renderer = null;
     this.toolManager = new AsciiEditor.tools.ToolManager();
@@ -22,7 +30,18 @@ AsciiEditor.Editor = class Editor {
     this.inlineEditor = null;
     this.cursorBlinkInterval = null;
 
+    // SEL-46: Clipboard persists across page switches
+    this.clipboard = [];
+
+    // DATA-50: Auto-save debounce timer
+    this.autoSaveTimer = null;
+    this.autoSaveDelay = 2000; // 2 seconds
+
     this.init();
+
+    if (savedState) {
+      console.log('Restored project from auto-save');
+    }
   }
 
   async init() {
@@ -51,6 +70,7 @@ AsciiEditor.Editor = class Editor {
     this.history.subscribe(() => {
       this.render();
       this.updateUI();
+      this.scheduleAutoSave(); // DATA-50: Auto-save on changes
     });
 
     // Initial render
@@ -131,6 +151,11 @@ AsciiEditor.Editor = class Editor {
     hk.register('ctrl+s', () => this.saveProject());
     hk.register('ctrl+e', () => this.exportASCII());
 
+    // SEL-40 to SEL-42: Clipboard operations
+    hk.register('ctrl+c', () => this.copySelection());
+    hk.register('ctrl+v', () => this.pasteClipboard());
+    hk.register('ctrl+x', () => this.cutSelection());
+
     // Escape
     hk.register('escape', () => {
       if (this.editingObjectId) {
@@ -193,6 +218,12 @@ AsciiEditor.Editor = class Editor {
       this.editPreviewText = this.inlineEditor.value;
       this.updateCursorPosition();
       this.render();
+
+      // Sync with properties panel textarea in real-time
+      const propText = document.getElementById('prop-text');
+      if (propText && propText !== document.activeElement) {
+        propText.value = this.inlineEditor.value;
+      }
     });
 
     // Track cursor position
@@ -386,9 +417,7 @@ AsciiEditor.Editor = class Editor {
       height: this.getCommonPropertyValue(objects, 'height'),
       style: this.getCommonPropertyValue(objects, 'style'),
       shadow: this.getCommonPropertyValue(objects, 'shadow'),
-      title: this.getCommonPropertyValue(objects, 'title'),
-      titlePosition: this.getCommonPropertyValue(objects, 'titlePosition'),
-      titleMode: this.getCommonPropertyValue(objects, 'titleMode'),
+      fill: this.getCommonPropertyValue(objects, 'fill'),
       textJustify: this.getCommonPropertyValue(objects, 'textJustify'),
       text: this.getCommonPropertyValue(objects, 'text')
     };
@@ -484,7 +513,7 @@ AsciiEditor.Editor = class Editor {
             ${props.style.mixed ? `<option value="" selected>${enumPlaceholder(props.style)}</option>` : ''}
             <option value="single" ${selectValue(props.style, 'single') === 'single' ? 'selected' : ''}>Single</option>
             <option value="double" ${selectValue(props.style, '') === 'double' ? 'selected' : ''}>Double</option>
-            <option value="rounded" ${selectValue(props.style, '') === 'rounded' ? 'selected' : ''}>Rounded</option>
+            <option value="thick" ${selectValue(props.style, '') === 'thick' ? 'selected' : ''}>Thick</option>
           </select>
         </div>
         <div class="property-row">
@@ -493,33 +522,16 @@ AsciiEditor.Editor = class Editor {
             <span>Drop Shadow ${props.shadow.mixed ? '(mixed)' : ''}</span>
           </label>
         </div>
-      </div>
-
-      <div class="property-group">
-        <div class="property-group-title">Title</div>
         <div class="property-row">
-          <input type="text" class="property-input ${props.title.mixed ? 'mixed' : ''}" id="prop-title"
-            value="${inputValue(props.title)}" placeholder="${textPlaceholder(props.title, 'Box title')}" ${textDataAttrs(props.title)}>
-        </div>
-        <div class="property-row">
-          <span class="property-label">Position</span>
-          <select class="property-select ${props.titlePosition.mixed ? 'mixed' : ''}" id="prop-titlePosition">
-            ${props.titlePosition.mixed ? `<option value="" selected>${enumPlaceholder(props.titlePosition)}</option>` : ''}
-            <option value="top-left" ${selectValue(props.titlePosition, 'top-left') === 'top-left' ? 'selected' : ''}>Top Left</option>
-            <option value="top-center" ${selectValue(props.titlePosition, '') === 'top-center' ? 'selected' : ''}>Top Center</option>
-            <option value="top-right" ${selectValue(props.titlePosition, '') === 'top-right' ? 'selected' : ''}>Top Right</option>
-            <option value="bottom-left" ${selectValue(props.titlePosition, '') === 'bottom-left' ? 'selected' : ''}>Bottom Left</option>
-            <option value="bottom-center" ${selectValue(props.titlePosition, '') === 'bottom-center' ? 'selected' : ''}>Bottom Center</option>
-            <option value="bottom-right" ${selectValue(props.titlePosition, '') === 'bottom-right' ? 'selected' : ''}>Bottom Right</option>
-          </select>
-        </div>
-        <div class="property-row">
-          <span class="property-label">Mode</span>
-          <select class="property-select ${props.titleMode.mixed ? 'mixed' : ''}" id="prop-titleMode">
-            ${props.titleMode.mixed ? `<option value="" selected>${enumPlaceholder(props.titleMode)}</option>` : ''}
-            <option value="border" ${selectValue(props.titleMode, 'border') === 'border' ? 'selected' : ''}>On Border</option>
-            <option value="inside" ${selectValue(props.titleMode, '') === 'inside' ? 'selected' : ''}>Inside</option>
-            <option value="outside" ${selectValue(props.titleMode, '') === 'outside' ? 'selected' : ''}>Outside</option>
+          <span class="property-label">Fill</span>
+          <select class="property-select ${props.fill.mixed ? 'mixed' : ''}" id="prop-fill">
+            ${props.fill.mixed ? `<option value="" selected>${enumPlaceholder(props.fill)}</option>` : ''}
+            <option value="none" ${selectValue(props.fill, 'none') === 'none' ? 'selected' : ''}>None</option>
+            <option value="light" ${selectValue(props.fill, '') === 'light' ? 'selected' : ''}>░ Light</option>
+            <option value="medium" ${selectValue(props.fill, '') === 'medium' ? 'selected' : ''}>▒ Medium</option>
+            <option value="dark" ${selectValue(props.fill, '') === 'dark' ? 'selected' : ''}>▓ Dark</option>
+            <option value="solid" ${selectValue(props.fill, '') === 'solid' ? 'selected' : ''}>█ Solid</option>
+            <option value="dots" ${selectValue(props.fill, '') === 'dots' ? 'selected' : ''}>· Dots</option>
           </select>
         </div>
       </div>
@@ -599,39 +611,11 @@ AsciiEditor.Editor = class Editor {
       });
     }
 
-    // MSE-21: Text input - focus handler to populate with first value
-    const titleInput = document.getElementById('prop-title');
-    if (titleInput) {
-      if (titleInput.classList.contains('mixed')) {
-        titleInput.addEventListener('focus', () => {
-          if (titleInput.value === '') {
-            const firstValue = titleInput.dataset.firstValue;
-            if (firstValue !== undefined && firstValue !== '') {
-              titleInput.value = firstValue;
-              titleInput.select();
-            }
-          }
-        });
-      }
-
-      titleInput.addEventListener('change', () => {
-        this.updateMultipleObjectsProperty(objectIds, 'title', titleInput.value);
-      });
-    }
-
-    const titlePosSelect = document.getElementById('prop-titlePosition');
-    if (titlePosSelect) {
-      titlePosSelect.addEventListener('change', () => {
-        if (titlePosSelect.value === '') return;
-        this.updateMultipleObjectsProperty(objectIds, 'titlePosition', titlePosSelect.value);
-      });
-    }
-
-    const titleModeSelect = document.getElementById('prop-titleMode');
-    if (titleModeSelect) {
-      titleModeSelect.addEventListener('change', () => {
-        if (titleModeSelect.value === '') return;
-        this.updateMultipleObjectsProperty(objectIds, 'titleMode', titleModeSelect.value);
+    const fillSelect = document.getElementById('prop-fill');
+    if (fillSelect) {
+      fillSelect.addEventListener('change', () => {
+        if (fillSelect.value === '') return;
+        this.updateMultipleObjectsProperty(objectIds, 'fill', fillSelect.value);
       });
     }
 
@@ -656,7 +640,8 @@ AsciiEditor.Editor = class Editor {
         });
       }
 
-      textArea.addEventListener('change', () => {
+      // UI-14: Real-time updates as user types
+      textArea.addEventListener('input', () => {
         this.updateMultipleObjectsProperty(objectIds, 'text', textArea.value);
       });
     }
@@ -685,11 +670,10 @@ AsciiEditor.Editor = class Editor {
     this.updatePropertiesPanel();
   }
 
+  // UI-12: Single selection property editor for text box
   renderBoxProperties(obj) {
     const content = document.getElementById('properties-content');
     const justify = obj.textJustify || 'center-center';
-    const titlePos = obj.titlePosition || 'top-left';
-    const titleMode = obj.titleMode || 'border';
 
     content.innerHTML = `
       <div class="property-group">
@@ -723,7 +707,7 @@ AsciiEditor.Editor = class Editor {
           <select class="property-select" id="prop-style">
             <option value="single" ${obj.style === 'single' ? 'selected' : ''}>Single</option>
             <option value="double" ${obj.style === 'double' ? 'selected' : ''}>Double</option>
-            <option value="rounded" ${obj.style === 'rounded' ? 'selected' : ''}>Rounded</option>
+            <option value="thick" ${obj.style === 'thick' ? 'selected' : ''}>Thick</option>
           </select>
         </div>
         <div class="property-row">
@@ -732,30 +716,15 @@ AsciiEditor.Editor = class Editor {
             <span>Drop Shadow</span>
           </label>
         </div>
-      </div>
-
-      <div class="property-group">
-        <div class="property-group-title">Title</div>
         <div class="property-row">
-          <input type="text" class="property-input" id="prop-title" value="${obj.title || ''}" placeholder="Box title">
-        </div>
-        <div class="property-row">
-          <span class="property-label">Position</span>
-          <select class="property-select" id="prop-titlePosition">
-            <option value="top-left" ${titlePos === 'top-left' ? 'selected' : ''}>Top Left</option>
-            <option value="top-center" ${titlePos === 'top-center' ? 'selected' : ''}>Top Center</option>
-            <option value="top-right" ${titlePos === 'top-right' ? 'selected' : ''}>Top Right</option>
-            <option value="bottom-left" ${titlePos === 'bottom-left' ? 'selected' : ''}>Bottom Left</option>
-            <option value="bottom-center" ${titlePos === 'bottom-center' ? 'selected' : ''}>Bottom Center</option>
-            <option value="bottom-right" ${titlePos === 'bottom-right' ? 'selected' : ''}>Bottom Right</option>
-          </select>
-        </div>
-        <div class="property-row">
-          <span class="property-label">Mode</span>
-          <select class="property-select" id="prop-titleMode">
-            <option value="border" ${titleMode === 'border' ? 'selected' : ''}>On Border</option>
-            <option value="inside" ${titleMode === 'inside' ? 'selected' : ''}>Inside</option>
-            <option value="outside" ${titleMode === 'outside' ? 'selected' : ''}>Outside</option>
+          <span class="property-label">Fill</span>
+          <select class="property-select" id="prop-fill">
+            <option value="none" ${(obj.fill || 'none') === 'none' ? 'selected' : ''}>None</option>
+            <option value="light" ${obj.fill === 'light' ? 'selected' : ''}>░ Light</option>
+            <option value="medium" ${obj.fill === 'medium' ? 'selected' : ''}>▒ Medium</option>
+            <option value="dark" ${obj.fill === 'dark' ? 'selected' : ''}>▓ Dark</option>
+            <option value="solid" ${obj.fill === 'solid' ? 'selected' : ''}>█ Solid</option>
+            <option value="dots" ${obj.fill === 'dots' ? 'selected' : ''}>· Dots</option>
           </select>
         </div>
       </div>
@@ -811,24 +780,10 @@ AsciiEditor.Editor = class Editor {
       });
     }
 
-    const titleInput = document.getElementById('prop-title');
-    if (titleInput) {
-      titleInput.addEventListener('change', () => {
-        this.updateObjectProperty(obj.id, 'title', titleInput.value);
-      });
-    }
-
-    const titlePosSelect = document.getElementById('prop-titlePosition');
-    if (titlePosSelect) {
-      titlePosSelect.addEventListener('change', () => {
-        this.updateObjectProperty(obj.id, 'titlePosition', titlePosSelect.value);
-      });
-    }
-
-    const titleModeSelect = document.getElementById('prop-titleMode');
-    if (titleModeSelect) {
-      titleModeSelect.addEventListener('change', () => {
-        this.updateObjectProperty(obj.id, 'titleMode', titleModeSelect.value);
+    const fillSelect = document.getElementById('prop-fill');
+    if (fillSelect) {
+      fillSelect.addEventListener('change', () => {
+        this.updateObjectProperty(obj.id, 'fill', fillSelect.value);
       });
     }
 
@@ -840,7 +795,8 @@ AsciiEditor.Editor = class Editor {
 
     const textArea = document.getElementById('prop-text');
     if (textArea) {
-      textArea.addEventListener('change', () => {
+      // UI-14: Real-time updates as user types
+      textArea.addEventListener('input', () => {
         this.updateObjectProperty(obj.id, 'text', textArea.value);
       });
     }
@@ -1097,6 +1053,9 @@ AsciiEditor.Editor = class Editor {
     a.click();
 
     URL.revokeObjectURL(url);
+
+    // DATA-52: Clear auto-save after successful manual save
+    this.clearStorage();
     console.log('Project saved');
   }
 
@@ -1133,6 +1092,147 @@ AsciiEditor.Editor = class Editor {
       reader.readAsText(file);
     };
     input.click();
+  }
+
+  // ============================================================
+  // AUTO-SAVE (DATA-50 to DATA-52)
+  // ============================================================
+
+  // DATA-50: Schedule auto-save with debounce
+  scheduleAutoSave() {
+    if (this.autoSaveTimer) {
+      clearTimeout(this.autoSaveTimer);
+    }
+    this.autoSaveTimer = setTimeout(() => {
+      this.saveToStorage();
+    }, this.autoSaveDelay);
+  }
+
+  // DATA-50: Save current state to localStorage
+  saveToStorage() {
+    try {
+      const state = this.history.getState();
+      const data = {
+        project: state.project,
+        activePageId: state.activePageId,
+        timestamp: Date.now()
+      };
+      localStorage.setItem(AsciiEditor.STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+      console.warn('Auto-save failed:', e);
+    }
+  }
+
+  // DATA-51: Load state from localStorage
+  loadFromStorage() {
+    try {
+      const saved = localStorage.getItem(AsciiEditor.STORAGE_KEY);
+      if (!saved) return null;
+
+      const data = JSON.parse(saved);
+      if (!data.project) return null;
+
+      // Reconstruct state with saved project
+      const state = AsciiEditor.core.createInitialState();
+      state.project = data.project;
+      state.activePageId = data.activePageId || data.project.pages[0]?.id;
+
+      return state;
+    } catch (e) {
+      console.warn('Failed to load auto-save:', e);
+      return null;
+    }
+  }
+
+  // DATA-52: Clear localStorage
+  clearStorage() {
+    try {
+      localStorage.removeItem(AsciiEditor.STORAGE_KEY);
+    } catch (e) {
+      console.warn('Failed to clear auto-save:', e);
+    }
+  }
+
+  // ============================================================
+  // CLIPBOARD OPERATIONS (SEL-40 to SEL-46)
+  // ============================================================
+
+  // SEL-40: Copy selected objects to clipboard
+  copySelection() {
+    const state = this.history.getState();
+    if (state.selection.ids.length === 0) return;
+
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    // Deep copy selected objects
+    const selectedObjects = state.selection.ids
+      .map(id => page.objects.find(o => o.id === id))
+      .filter(obj => obj != null)
+      .map(obj => JSON.parse(JSON.stringify(obj)));
+
+    this.clipboard = selectedObjects;
+    console.log(`Copied ${this.clipboard.length} object(s) to clipboard`);
+  }
+
+  // SEL-41, SEL-43, SEL-44, SEL-45: Paste clipboard contents
+  pasteClipboard() {
+    if (this.clipboard.length === 0) return;
+
+    const state = this.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const newIds = [];
+
+    this.clipboard.forEach(obj => {
+      // SEL-43: Create new object with new ID
+      const newObj = JSON.parse(JSON.stringify(obj));
+      newObj.id = AsciiEditor.core.generateId();
+
+      // SEL-44: Offset +2 chars right and down
+      newObj.x += 2;
+      newObj.y += 2;
+
+      this.history.execute(new AsciiEditor.core.CreateObjectCommand(state.activePageId, newObj));
+      newIds.push(newObj.id);
+    });
+
+    // SEL-45: Pasted objects become the new selection
+    this.history.updateState(s => ({
+      ...s,
+      selection: { ids: newIds, handles: null }
+    }));
+
+    console.log(`Pasted ${newIds.length} object(s)`);
+  }
+
+  // SEL-42: Cut = copy + delete
+  cutSelection() {
+    const state = this.history.getState();
+    if (state.selection.ids.length === 0) return;
+
+    // First copy
+    this.copySelection();
+
+    // Then delete
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    state.selection.ids.forEach(id => {
+      const obj = page.objects.find(o => o.id === id);
+      if (obj) {
+        this.history.execute(new AsciiEditor.core.DeleteObjectCommand(state.activePageId, obj));
+      }
+    });
+
+    // Clear selection
+    this.history.updateState(s => ({
+      ...s,
+      selection: { ids: [], handles: null }
+    }));
+
+    console.log(`Cut ${this.clipboard.length} object(s)`);
   }
 
   // ============================================================
@@ -1179,10 +1279,11 @@ AsciiEditor.Editor = class Editor {
     const chars = {
       single: { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' },
       double: { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' },
-      rounded: { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' }
+      thick: { tl: '█', tr: '█', bl: '█', br: '█', h: '█', v: '█' }
     };
 
     const c = chars[style] || chars.single;
+    const hasBorder = style && style !== 'none';
 
     const setChar = (col, row, char) => {
       if (row >= 0 && row < buffer.length && col >= 0 && col < buffer[0].length) {
@@ -1190,7 +1291,8 @@ AsciiEditor.Editor = class Editor {
       }
     };
 
-    if (shadow) {
+    // Draw shadow first (if enabled and has border)
+    if (shadow && hasBorder) {
       for (let row = 1; row <= height; row++) {
         setChar(x + width, y + row, '░');
       }
@@ -1200,52 +1302,44 @@ AsciiEditor.Editor = class Editor {
       setChar(x + width, y + height, '░');
     }
 
-    setChar(x, y, c.tl);
-    for (let col = 1; col < width - 1; col++) {
-      setChar(x + col, y, c.h);
-    }
-    setChar(x + width - 1, y, c.tr);
+    // Draw border (if not style: none)
+    if (hasBorder) {
+      // Top border
+      setChar(x, y, c.tl);
+      for (let col = 1; col < width - 1; col++) {
+        setChar(x + col, y, c.h);
+      }
+      setChar(x + width - 1, y, c.tr);
 
-    for (let row = 1; row < height - 1; row++) {
-      setChar(x, y + row, c.v);
-      setChar(x + width - 1, y + row, c.v);
-    }
-
-    setChar(x, y + height - 1, c.bl);
-    for (let col = 1; col < width - 1; col++) {
-      setChar(x + col, y + height - 1, c.h);
-    }
-    setChar(x + width - 1, y + height - 1, c.br);
-
-    if (obj.title) {
-      const titlePos = obj.titlePosition || 'top-left';
-      const titleMode = obj.titleMode || 'border';
-      const [titleV, titleH] = titlePos.split('-');
-      const maxTitleLen = width - 4;
-      const displayTitle = obj.title.length > maxTitleLen ? obj.title.substring(0, maxTitleLen) : obj.title;
-
-      let titleX, titleY;
-
-      if (titleV === 'top') {
-        if (titleMode === 'outside') titleY = y - 1;
-        else if (titleMode === 'inside') titleY = y + 1;
-        else titleY = y;
-      } else if (titleV === 'bottom') {
-        if (titleMode === 'outside') titleY = y + height;
-        else if (titleMode === 'inside') titleY = y + height - 2;
-        else titleY = y + height - 1;
+      // Sides
+      for (let row = 1; row < height - 1; row++) {
+        setChar(x, y + row, c.v);
+        setChar(x + width - 1, y + row, c.v);
       }
 
-      if (titleH === 'left') {
-        titleX = titleMode === 'inside' ? x + 1 : x + 2;
-      } else if (titleH === 'center') {
-        titleX = x + Math.floor((width - displayTitle.length) / 2);
-      } else if (titleH === 'right') {
-        titleX = titleMode === 'inside' ? x + width - displayTitle.length - 1 : x + width - displayTitle.length - 2;
+      // Bottom border
+      setChar(x, y + height - 1, c.bl);
+      for (let col = 1; col < width - 1; col++) {
+        setChar(x + col, y + height - 1, c.h);
       }
+      setChar(x + width - 1, y + height - 1, c.br);
+    }
 
-      for (let i = 0; i < displayTitle.length; i++) {
-        setChar(titleX + i, titleY, displayTitle[i]);
+    // OBJ-16, OBJ-17: Fill interior
+    const fillChars = {
+      'none': null,
+      'light': '░',
+      'medium': '▒',
+      'dark': '▓',
+      'solid': '█',
+      'dots': '·'
+    };
+    const fillChar = fillChars[obj.fill];
+    if (fillChar) {
+      for (let row = 1; row < height - 1; row++) {
+        for (let col = 1; col < width - 1; col++) {
+          setChar(x + col, y + row, fillChar);
+        }
       }
     }
 

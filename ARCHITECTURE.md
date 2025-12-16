@@ -456,17 +456,89 @@ cat js/core/*.js js/objects/*.js js/tools/*.js js/ui/*.js js/rendering/*.js js/E
 
 Or inline into HTML manually. The namespace pattern (`AsciiEditor.*`) ensures no conflicts.
 
-### No Build Tools Required
+### No Build Tools Required (for runtime)
 
-- No npm/node required for development
 - No transpilation (ES6 classes work in all modern browsers)
 - No bundler (Webpack, Rollup, esbuild)
 - No framework (React, Vue, Angular)
 - Pure vanilla JavaScript
 
+**Note:** npm/node IS required for running unit tests (Jest), but NOT for running the application itself.
+
 ---
 
-## 10. Design Decisions
+## 10. Testing
+
+### Test Framework
+
+- **Jest** with **jsdom** for unit testing
+- Tests run in Node.js with DOM simulation
+- Browser-based tests for canvas/visual verification
+
+### Directory Structure
+
+```
+test/
+├── setup.js           # Loads AsciiEditor namespace into Jest
+├── utils.test.js      # Core utility function tests
+├── commands.test.js   # Command pattern (undo/redo) tests
+├── export.test.js     # ASCII export rendering tests
+└── test-export.html   # Browser-based interactive testing
+```
+
+### Running Tests
+
+```bash
+npm install            # First time only
+npm test               # Run all tests
+npm test -- --watch    # Watch mode
+npm test -- --coverage # Coverage report
+npm test -- export     # Run specific test file
+```
+
+### Test Requirements
+
+All new logic functions MUST have corresponding unit tests:
+
+1. **Pure functions** (utils, calculations): Test inputs/outputs
+2. **Commands**: Test `execute()` and `undo()` return correct state
+3. **Export functions**: Test ASCII output matches expected strings
+4. **State functions**: Test state transformations
+
+### Writing Tests
+
+```javascript
+// test/example.test.js
+describe('functionName', () => {
+  test('describes expected behavior', () => {
+    const result = AsciiEditor.core.functionName(input);
+    expect(result).toBe(expectedOutput);
+  });
+});
+```
+
+### Test Setup (test/setup.js)
+
+The setup file loads modules into the global `AsciiEditor` namespace:
+
+```javascript
+global.AsciiEditor = {};
+global.AsciiEditor.core = {};
+require('../js/core/utils.js');
+require('../js/core/Command.js');
+// ... other modules
+```
+
+### Browser-Based Testing
+
+For canvas rendering and visual verification, use `test/test-export.html`:
+- Interactive box JSON input
+- Visual output comparison
+- Character-by-character analysis
+
+---
+
+## 12. Design Decisions
 
 ### Why Vanilla JavaScript (No Framework)?
 
@@ -514,7 +586,7 @@ Or inline into HTML manually. The namespace pattern (`AsciiEditor.*`) ensures no
 
 ---
 
-## 11. CSS Variables Reference
+## 13. CSS Variables Reference
 
 All colors are defined via CSS variables for easy theming:
 

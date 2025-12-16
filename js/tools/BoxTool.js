@@ -51,17 +51,16 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
       // OBJ-11: Minimum size 3x3
       if (width >= 3 && height >= 3) {
         const state = context.history.getState();
+        // TOOL-21: Create text box object
         const newBox = {
           id: AsciiEditor.core.generateId(),
           type: 'box',
           x, y, width, height,
           text: '',
-          style: 'single',  // OBJ-12: single, double, rounded
+          style: 'single',  // OBJ-12: single, double, thick, none
           shadow: false,    // OBJ-14: Optional drop shadow
-          textJustify: 'center-center',  // OBJ-15: 9-position justification
-          title: '',        // OBJ-16: Optional title
-          titlePosition: 'top-left',
-          titleMode: 'border'  // OBJ-17: border, inside, outside
+          fill: 'none',     // OBJ-16, OBJ-17: Interior fill character
+          textJustify: 'center-center'  // OBJ-15: 9-position justification
         };
 
         context.history.execute(new AsciiEditor.core.CreateObjectCommand(state.activePageId, newBox));
@@ -77,6 +76,24 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
       this.startPos = null;
       this.currentPos = null;
       return true;
+    }
+    return false;
+  }
+
+  // Allow typing when a box is selected while in box tool mode
+  onKeyDown(event, context) {
+    const state = context.history.getState();
+
+    // If single box selected and printable key, start inline edit
+    if (state.selection.ids.length === 1 && event.key.length === 1 && !event.ctrlKey && !event.altKey) {
+      const page = state.project.pages.find(p => p.id === state.activePageId);
+      if (page) {
+        const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+        if (obj && obj.type === 'box' && context.startInlineEdit) {
+          context.startInlineEdit(obj, event.key);
+          return true;
+        }
+      }
     }
     return false;
   }

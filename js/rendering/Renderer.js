@@ -68,9 +68,20 @@ AsciiEditor.rendering.Renderer = class Renderer {
     }
   }
 
-  drawChar(char, col, row, color = null) {
+  drawChar(char, col, row, color = null, clearBackground = false) {
     const font = this.fontLoaded ? 'BerkeleyMono' : 'monospace';
     this.ctx.font = `16px ${font}`;
+
+    const x = col * this.grid.charWidth;
+    const y = row * this.grid.charHeight;
+
+    // Clear cell background if requested (for text over fill)
+    if (clearBackground) {
+      const styles = getComputedStyle(document.documentElement);
+      const bgCanvas = styles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+      this.ctx.fillStyle = bgCanvas;
+      this.ctx.fillRect(x, y, this.grid.charWidth, this.grid.charHeight);
+    }
 
     if (color === null) {
       const styles = getComputedStyle(document.documentElement);
@@ -79,14 +90,12 @@ AsciiEditor.rendering.Renderer = class Renderer {
     this.ctx.fillStyle = color;
     this.ctx.textBaseline = 'top';
 
-    const x = col * this.grid.charWidth;
-    const y = row * this.grid.charHeight;
     this.ctx.fillText(char, x, y + 2); // +2 for vertical alignment
   }
 
-  drawText(text, col, row, color = null) {
+  drawText(text, col, row, color = null, clearBackground = false) {
     for (let i = 0; i < text.length; i++) {
-      this.drawChar(text[i], col + i, row, color);
+      this.drawChar(text[i], col + i, row, color, clearBackground);
     }
   }
 
@@ -98,17 +107,17 @@ AsciiEditor.rendering.Renderer = class Renderer {
     const chars = {
       single: { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' },
       double: { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' },
-      rounded: { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' }
+      thick: { tl: '█', tr: '█', bl: '█', br: '█', h: '█', v: '█' }
     };
 
     const c = chars[style] || chars.single;
+    const hasBorder = style && style !== 'none';
     const styles = getComputedStyle(document.documentElement);
     const color = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
     const shadowColor = styles.getPropertyValue('--text-shadow').trim() || '#555555';
-    const titleColor = styles.getPropertyValue('--accent').trim() || '#007acc';
 
-    // VIS-20: Draw shadow first if enabled
-    if (shadow) {
+    // VIS-20: Draw shadow first if enabled (only if has border)
+    if (shadow && hasBorder) {
       for (let row = 1; row <= height; row++) {
         this.drawChar('░', x + width, y + row, shadowColor);
       }
@@ -118,66 +127,45 @@ AsciiEditor.rendering.Renderer = class Renderer {
       this.drawChar('░', x + width, y + height, shadowColor);
     }
 
-    // Top border
-    this.drawChar(c.tl, x, y, color);
-    for (let col = 1; col < width - 1; col++) {
-      this.drawChar(c.h, x + col, y, color);
-    }
-    this.drawChar(c.tr, x + width - 1, y, color);
+    // Draw border (if not style: none)
+    if (hasBorder) {
+      // Top border
+      this.drawChar(c.tl, x, y, color);
+      for (let col = 1; col < width - 1; col++) {
+        this.drawChar(c.h, x + col, y, color);
+      }
+      this.drawChar(c.tr, x + width - 1, y, color);
 
-    // Sides
-    for (let row = 1; row < height - 1; row++) {
-      this.drawChar(c.v, x, y + row, color);
-      this.drawChar(c.v, x + width - 1, y + row, color);
-    }
-
-    // Bottom border
-    this.drawChar(c.bl, x, y + height - 1, color);
-    for (let col = 1; col < width - 1; col++) {
-      this.drawChar(c.h, x + col, y + height - 1, color);
-    }
-    this.drawChar(c.br, x + width - 1, y + height - 1, color);
-
-    // OBJ-16, OBJ-17: Draw title if present
-    if (obj.title) {
-      const titlePos = obj.titlePosition || 'top-left';
-      const titleMode = obj.titleMode || 'border';
-      const [titleV, titleH] = titlePos.split('-');
-      const titleText = obj.title;
-      const maxTitleLen = width - 4;
-      const displayTitle = titleText.length > maxTitleLen ? titleText.substring(0, maxTitleLen) : titleText;
-
-      let titleX, titleY;
-
-      // Vertical position based on mode
-      if (titleV === 'top') {
-        if (titleMode === 'outside') {
-          titleY = y - 1;
-        } else if (titleMode === 'inside') {
-          titleY = y + 1;
-        } else {
-          titleY = y;
-        }
-      } else if (titleV === 'bottom') {
-        if (titleMode === 'outside') {
-          titleY = y + height;
-        } else if (titleMode === 'inside') {
-          titleY = y + height - 2;
-        } else {
-          titleY = y + height - 1;
-        }
+      // Sides
+      for (let row = 1; row < height - 1; row++) {
+        this.drawChar(c.v, x, y + row, color);
+        this.drawChar(c.v, x + width - 1, y + row, color);
       }
 
-      // Horizontal position
-      if (titleH === 'left') {
-        titleX = titleMode === 'inside' ? x + 1 : x + 2;
-      } else if (titleH === 'center') {
-        titleX = x + Math.floor((width - displayTitle.length) / 2);
-      } else if (titleH === 'right') {
-        titleX = titleMode === 'inside' ? x + width - displayTitle.length - 1 : x + width - displayTitle.length - 2;
+      // Bottom border
+      this.drawChar(c.bl, x, y + height - 1, color);
+      for (let col = 1; col < width - 1; col++) {
+        this.drawChar(c.h, x + col, y + height - 1, color);
       }
+      this.drawChar(c.br, x + width - 1, y + height - 1, color);
+    }
 
-      this.drawText(displayTitle, titleX, titleY, titleColor);
+    // OBJ-16, OBJ-17: Draw fill in interior
+    const fillChars = {
+      'none': null,
+      'light': '░',
+      'medium': '▒',
+      'dark': '▓',
+      'solid': '█',
+      'dots': '·'
+    };
+    const fillChar = fillChars[obj.fill];
+    if (fillChar) {
+      for (let row = 1; row < height - 1; row++) {
+        for (let col = 1; col < width - 1; col++) {
+          this.drawChar(fillChar, x + col, y + row, color);
+        }
+      }
     }
 
     // OBJ-15: Draw multi-line text inside with 9-position justification
@@ -202,6 +190,9 @@ AsciiEditor.rendering.Renderer = class Renderer {
         startY = y + 1 + Math.floor((innerHeight - displayLines.length) / 2);
       }
 
+      // Clear background for text if there's a fill
+      const hasFill = obj.fill && obj.fill !== 'none';
+
       // Draw each line
       displayLines.forEach((line, i) => {
         const displayLine = line.length > innerWidth ? line.substring(0, innerWidth) : line;
@@ -215,7 +206,7 @@ AsciiEditor.rendering.Renderer = class Renderer {
           textX = x + 1 + Math.floor((innerWidth - displayLine.length) / 2);
         }
 
-        this.drawText(displayLine, textX, startY + i, color);
+        this.drawText(displayLine, textX, startY + i, color, hasFill);
       });
     }
   }

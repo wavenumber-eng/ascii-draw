@@ -63,8 +63,8 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 | Status | ID | Tool | Shortcut | Description |
 |--------|-----|------|----------|-------------|
 | [x] | **TOOL-20** | SelectTool | V | Select, move, resize objects |
-| [x] | **TOOL-21** | BoxTool | B | Create text boxes |
-| [ ] | **TOOL-22** | TextTool | T | Create free-floating text |
+| [x] | **TOOL-21** | TextBoxTool | B | Create text box with border (default: single) |
+| [ ] | **TOOL-22** | TextBoxTool | T | Create text box without border (style: none) |
 | [ ] | **TOOL-23** | LineTool | L | Create lines and connectors |
 | [ ] | **TOOL-24** | SymbolTool | S | Create pin/node boxes (schematic symbols) |
 | [ ] | **TOOL-25** | WireTool | W | Create wires with net labels |
@@ -85,23 +85,16 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 - [x] **OBJ-6**: All objects implement rendering to canvas
 - [ ] **OBJ-7**: Objects may have arbitrary key-value parameters (metadata)
 
-### Box Object
+### Text Box Object
 
 - [x] **OBJ-10**: Rectangular box with border and optional text content
 - [x] **OBJ-11**: Properties: x, y, width, height (minimum 3x3)
-- [x] **OBJ-12**: Border styles: single, double, rounded
-- [x] **OBJ-13**: UTF-8 box-drawing characters: ─ │ ┌ ┐ └ ┘ (single), ═ ║ ╔ ╗ ╚ ╝ (double), ╭ ╮ ╰ ╯ (rounded)
+- [x] **OBJ-12**: Border styles: single, double, thick, none
+- [x] **OBJ-13**: UTF-8 box-drawing characters: ─ │ ┌ ┐ └ ┘ (single), ═ ║ ╔ ╗ ╚ ╝ (double), █ (thick/solid block)
 - [x] **OBJ-14**: Optional drop shadow using ░ character
 - [x] **OBJ-15**: Text content with 9-position justification (top/center/bottom + left/center/right)
-- [x] **OBJ-16**: Optional title on border (position: top/bottom + left/center/right)
-- [x] **OBJ-17**: Title modes: on border, inside, outside
-
-### Text Object
-
-- [ ] **OBJ-20**: Free-floating text placeable anywhere
-- [ ] **OBJ-21**: Properties: x, y, text content
-- [ ] **OBJ-22**: For labels, annotations, titles, notes
-- [ ] **OBJ-23**: Not bound to any box
+- [x] **OBJ-16**: Optional fill property for interior whitespace
+- [x] **OBJ-17**: Fill characters: none (default), ░ (light), ▒ (medium), ▓ (dark), █ (solid), · (dots)
 
 ### Line Object
 
@@ -190,6 +183,16 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 - [x] **SEL-22**: Resize handles shown only for single selection
 - [x] **SEL-23**: Delete/Backspace removes selected objects
 
+### Clipboard Operations
+
+- [x] **SEL-40**: Ctrl+C copies selected objects to internal clipboard
+- [x] **SEL-41**: Ctrl+V pastes objects from clipboard at offset position
+- [x] **SEL-42**: Ctrl+X cuts selected objects (copy + delete)
+- [x] **SEL-43**: Paste creates new objects with new IDs
+- [x] **SEL-44**: Paste offset: +2 chars right and down from original position
+- [x] **SEL-45**: Pasted objects become the new selection
+- [x] **SEL-46**: Clipboard persists across page switches within project
+
 ### Inline Text Editing
 
 - [x] **SEL-30**: Double-click box opens inline editor for text content
@@ -259,7 +262,6 @@ When user focuses a mixed field, auto-populate to enable quick editing:
   - Position: X, Y (numbers) — range indicator, min-value focus
   - Size: Width, Height (numbers) — range indicator, min-value focus
   - Style: Border style (enum/select), Shadow (boolean/checkbox)
-  - Title: Text (text), Position (enum/select), Mode (enum/select)
   - Content: Justify (enum/buttons), Text (textarea)
 
 ---
@@ -340,6 +342,12 @@ When user focuses a mixed field, auto-populate to enable quick editing:
 - [x] **DATA-41**: Load project from JSON file
 - [x] **DATA-42**: Project file stores complete state for editing
 
+### Auto-Save (Recovery)
+
+- [x] **DATA-50**: Auto-save to localStorage on edits (debounced, 2 second delay)
+- [x] **DATA-51**: Restore from localStorage on startup if data exists
+- [x] **DATA-52**: Clear localStorage after successful manual save
+
 ---
 
 ## 9. Export
@@ -416,6 +424,9 @@ When user focuses a mixed field, auto-populate to enable quick editing:
 | Ctrl+Y / Ctrl+Shift+Z | Redo | ARCH-12 | [x] |
 | Ctrl+S | Save project | DATA-40 | [x] |
 | Ctrl+E | Export ASCII | EXP-1 | [x] |
+| Ctrl+C | Copy | SEL-40 | [x] |
+| Ctrl+V | Paste | SEL-41 | [x] |
+| Ctrl+X | Cut | SEL-42 | [x] |
 
 ---
 
@@ -428,17 +439,58 @@ When user focuses a mixed field, auto-populate to enable quick editing:
 | Philosophy (PHIL) | 8 | 13 | 62% |
 | Deployment (DEP) | 4 | 5 | 80% |
 | Tools (TOOL) | 2 | 8 | 25% |
-| Objects (OBJ) | 15 | 55 | 27% |
-| Selection (SEL) | 20 | 20 | 100% |
+| Objects (OBJ) | 15 | 51 | 29% |
+| Selection (SEL) | 27 | 27 | 100% |
 | Multi-Select Edit (MSE) | 25 | 25 | 100% |
 | User Interface (UI) | 18 | 18 | 100% |
-| Data Model (DATA) | 7 | 12 | 58% |
+| Data Model (DATA) | 10 | 15 | 67% |
 | Export (EXP) | 2 | 12 | 17% |
 | Visual (VIS) | 10 | 11 | 91% |
 
 ### Next Priority
 
-1. TOOL-22 (TextTool) - Free-floating text objects
+1. TOOL-22 - Text box without border (T shortcut, style: none)
 2. TOOL-23 (LineTool) - Lines with arrows
-3. Copy/paste support
-4. TOOL-24 (SymbolTool) - Pin/node boxes for schematic symbols
+3. TOOL-24 (SymbolTool) - Pin/node boxes for schematic symbols
+
+---
+
+## 13. Testing Requirements
+
+### Unit Testing Framework
+
+- [x] **TEST-1**: Jest with jsdom for unit testing
+- [x] **TEST-2**: Tests located in `test/` directory with `.test.js` suffix
+- [x] **TEST-3**: Run tests with `npm test`
+
+### Test Coverage Requirements
+
+- [x] **TEST-10**: All utility functions must have unit tests
+- [x] **TEST-11**: All Command classes must have execute/undo tests
+- [x] **TEST-12**: Export rendering functions must have output verification tests
+- [ ] **TEST-13**: New logic functions require corresponding unit tests before merge
+
+### Test Categories
+
+| Status | ID | Category | Description |
+|--------|-----|----------|-------------|
+| [x] | **TEST-20** | utils.test.js | Core utilities: generateId, clamp, deepClone |
+| [x] | **TEST-21** | commands.test.js | Command pattern: Create, Delete, Move, Modify |
+| [x] | **TEST-22** | export.test.js | ASCII export: box rendering, borders, text, fill |
+| [ ] | **TEST-23** | state.test.js | State management and history |
+| [ ] | **TEST-24** | tools.test.js | Tool behavior (may need mocking) |
+
+### Test Commands
+
+```bash
+npm test              # Run all tests
+npm test -- --watch   # Watch mode (re-run on changes)
+npm test -- --coverage # Generate coverage report
+npm test -- export    # Run only export tests
+```
+
+### Browser-Based Testing
+
+- [x] **TEST-30**: `test/test-export.html` for interactive browser testing
+- [x] **TEST-31**: Visual diff comparison for export output
+- [x] **TEST-32**: Character-by-character analysis for debugging

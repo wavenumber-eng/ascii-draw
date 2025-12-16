@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ASCII Editor Export Tests</title>
+  <style>
+    body {
+      font-family: 'Berkeley Mono', monospace;
+      background: #1a1a1a;
+      color: #ccc;
+      padding: 20px;
+    }
+    .test-result {
+      margin: 10px 0;
+      padding: 10px;
+      border: 1px solid #333;
+    }
+    .pass { border-color: #0a0; background: #0a02; }
+    .fail { border-color: #a00; background: #a002; }
+    pre {
+      background: #000;
+      padding: 10px;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .expected { color: #0a0; }
+    .actual { color: #fa0; }
+    h2 { margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <h1>ASCII Editor Export Tests</h1>
+  <div id="results"></div>
+
+  <!-- Load core modules -->
+  <script src="../js/core/utils.js"></script>
+  <script src="../js/core/CharacterGrid.js"></script>
+  <script src="../js/core/Command.js"></script>
+  <script src="../js/core/HistoryManager.js"></script>
+  <script src="../js/core/State.js"></script>
+
+  <script>
+    // Test framework
+    const results = document.getElementById('results');
+    let passCount = 0;
+    let failCount = 0;
+
+    function renderBoxToBuffer(buffer, obj) {
+      const { x, y, width, height, style, text, shadow } = obj;
+
+      const chars = {
+        single: { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' },
+        double: { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' },
+        thick: { tl: '█', tr: '█', bl: '█', br: '█', h: '█', v: '█' }
+      };
+
+      const c = chars[style] || chars.single;
+      const hasBorder = style && style !== 'none';
+
+      const setChar = (col, row, char) => {
+        if (row >= 0 && row < buffer.length && col >= 0 && col < buffer[0].length) {
+          buffer[row][col] = char;
+        }
+      };
+
+      // Draw shadow first (if enabled and has border)
+      if (shadow && hasBorder) {
+        for (let row = 1; row <= height; row++) {
+          setChar(x + width, y + row, '░');
+        }
+        for (let col = 1; col < width; col++) {
+          setChar(x + col, y + height, '░');
+        }
+        setChar(x + width, y + height, '░');
+      }
+
+      // Draw border (if not style: none)
+      if (hasBorder) {
+        // Top border
+        setChar(x, y, c.tl);
+        for (let col = 1; col < width - 1; col++) {
+          setChar(x + col, y, c.h);
+        }
+        setChar(x + width - 1, y, c.tr);
+
+        // Sides
+        for (let row = 1; row < height - 1; row++) {
+          setChar(x, y + row, c.v);
+          setChar(x + width - 1, y + row, c.v);
+        }
+
+        // Bottom border
+        setChar(x, y + height - 1, c.bl);
+        for (let col = 1; col < width - 1; col++) {
+          setChar(x + col, y + height - 1, c.h);
+        }
+        setChar(x + width - 1, y + height - 1, c.br);
+      }
+
+      // Fill interior
+      const fillChars = {
+        'none': null,
+        'light': '░',
+        'medium': '▒',
+        'dark': '▓',
+        'solid': '█',
+        'dots': '·'
+      };
+      const fillChar = fillChars[obj.fill];
+      if (fillChar) {
+        for (let row = 1; row < height - 1; row++) {
+          for (let col = 1; col < width - 1; col++) {
+            setChar(x + col, y + row, fillChar);
+          }
+        }
+      }
+
+      // Text
+      if (text) {
+        const innerWidth = width - 2;
+        const innerHeight = height - 2;
+        const lines = text.split('\n');
+        const maxLines = innerHeight;
+        const displayLines = lines.slice(0, maxLines);
+
+        const justify = obj.textJustify || 'center-center';
+        const [vAlign, hAlign] = justify.split('-');
+
+        let startY;
+        if (vAlign === 'top') {
+          startY = y + 1;
+        } else if (vAlign === 'bottom') {
+          startY = y + height - 1 - displayLines.length;
+        } else {
+          startY = y + 1 + Math.floor((innerHeight - displayLines.length) / 2);
+        }
+
+        displayLines.forEach((line, i) => {
+          const displayLine = line.length > innerWidth ? line.substring(0, innerWidth) : line;
+          let textX;
+
+          if (hAlign === 'left') {
+            textX = x + 1;
+          } else if (hAlign === 'right') {
+            textX = x + width - 1 - displayLine.length;
+          } else {
+            textX = x + 1 + Math.floor((innerWidth - displayLine.length) / 2);
+          }
+
+          for (let j = 0; j < displayLine.length; j++) {
+            setChar(textX + j, startY + i, displayLine[j]);
+          }
+        });
+      }
+    }
+
+    function createBuffer(width, height) {
+      const buffer = [];
+      for (let r = 0; r < height; r++) {
+        buffer.push(new Array(width).fill(' '));
+      }
+      return buffer;
+    }
+
+    function bufferToString(buffer) {
+      return buffer.map(row => row.join('')).join('\n');
+    }
+
+    function runTest(name, box, pageWidth, pageHeight, expected) {
+      const buffer = createBuffer(pageWidth, pageHeight);
+      renderBoxToBuffer(buffer, box);
+      const actual = bufferToString(buffer);
+
+      const passed = actual === expected;
+      if (passed) passCount++;
+      else failCount++;
+
+      const div = document.createElement('div');
+      div.className = `test-result ${passed ? 'pass' : 'fail'}`;
+      div.innerHTML = `
+        <strong>${passed ? '✓ PASS' : '✗ FAIL'}: ${name}</strong>
+        <br>Box: x=${box.x}, y=${box.y}, w=${box.width}, h=${box.height}, style=${box.style}, shadow=${box.shadow}, fill=${box.fill || 'none'}
+        ${!passed ? `
+          <h4>Expected:</h4>
+          <pre class="expected">${escapeHtml(expected)}</pre>
+          <h4>Actual:</h4>
+          <pre class="actual">${escapeHtml(actual)}</pre>
+          <h4>Diff (char codes):</h4>
+          <pre>${showDiff(expected, actual)}</pre>
+        ` : `<pre>${escapeHtml(actual)}</pre>`}
+      `;
+      results.appendChild(div);
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function showDiff(expected, actual) {
+      let diff = '';
+      const expLines = expected.split('\n');
+      const actLines = actual.split('\n');
+      const maxLines = Math.max(expLines.length, actLines.length);
+
+      for (let i = 0; i < maxLines; i++) {
+        const expLine = expLines[i] || '';
+        const actLine = actLines[i] || '';
+        if (expLine !== actLine) {
+          diff += `Line ${i}: expected length=${expLine.length}, actual length=${actLine.length}\n`;
+          diff += `  Expected: "${expLine}"\n`;
+          diff += `  Actual:   "${actLine}"\n`;
+          // Show char-by-char diff
+          const maxLen = Math.max(expLine.length, actLine.length);
+          for (let j = 0; j < maxLen; j++) {
+            const ec = expLine[j];
+            const ac = actLine[j];
+            if (ec !== ac) {
+              diff += `    Pos ${j}: expected '${ec || 'EOF'}' (${ec ? ec.charCodeAt(0) : 'N/A'}) vs actual '${ac || 'EOF'}' (${ac ? ac.charCodeAt(0) : 'N/A'})\n`;
+            }
+          }
+        }
+      }
+      return diff || 'No differences found in content, check whitespace/line endings';
+    }
+
+    // Run tests
+    console.log('Running export tests...');
+
+    // Test 1: Simple 5x3 box
+    runTest('Simple 5x3 single border', {
+      x: 0, y: 0, width: 5, height: 3,
+      style: 'single', shadow: false, text: '', textJustify: 'center-center'
+    }, 5, 3,
+      '┌───┐\n' +
+      '│   │\n' +
+      '└───┘'
+    );
+
+    // Test 2: 7x5 box with text
+    runTest('7x5 box with centered text', {
+      x: 0, y: 0, width: 7, height: 5,
+      style: 'single', shadow: false, text: 'Hi', textJustify: 'center-center'
+    }, 7, 5,
+      '┌─────┐\n' +
+      '│     │\n' +
+      '│ Hi  │\n' +
+      '│     │\n' +
+      '└─────┘'
+    );
+
+    // Test 3: Box with shadow
+    runTest('5x3 box with shadow', {
+      x: 0, y: 0, width: 5, height: 3,
+      style: 'single', shadow: true, text: '', textJustify: 'center-center'
+    }, 6, 4,
+      '┌───┐ \n' +
+      '│   │░\n' +
+      '└───┘░\n' +
+      ' ░░░░░'
+    );
+
+    // Test 4: Double border
+    runTest('5x3 double border', {
+      x: 0, y: 0, width: 5, height: 3,
+      style: 'double', shadow: false, text: '', textJustify: 'center-center'
+    }, 5, 3,
+      '╔═══╗\n' +
+      '║   ║\n' +
+      '╚═══╝'
+    );
+
+    // Test 5: Box at offset position
+    runTest('5x3 box at x=2, y=1', {
+      x: 2, y: 1, width: 5, height: 3,
+      style: 'single', shadow: false, text: '', textJustify: 'center-center'
+    }, 10, 5,
+      '          \n' +
+      '  ┌───┐   \n' +
+      '  │   │   \n' +
+      '  └───┘   \n' +
+      '          '
+    );
+
+    // Test 6: Minimum 3x3 box
+    runTest('Minimum 3x3 box', {
+      x: 0, y: 0, width: 3, height: 3,
+      style: 'single', shadow: false, text: '', textJustify: 'center-center'
+    }, 3, 3,
+      '┌─┐\n' +
+      '│ │\n' +
+      '└─┘'
+    );
+
+    // Test 7: Box with fill
+    runTest('5x4 box with light fill', {
+      x: 0, y: 0, width: 5, height: 4,
+      style: 'single', shadow: false, fill: 'light', text: '', textJustify: 'center-center'
+    }, 5, 4,
+      '┌───┐\n' +
+      '│░░░│\n' +
+      '│░░░│\n' +
+      '└───┘'
+    );
+
+    // Test 8: Box with fill and text (text should appear over fill)
+    runTest('7x5 box with fill and text', {
+      x: 0, y: 0, width: 7, height: 5,
+      style: 'single', shadow: false, fill: 'light', text: 'Hi', textJustify: 'center-center'
+    }, 7, 5,
+      '┌─────┐\n' +
+      '│░░░░░│\n' +
+      '│░Hi░░│\n' +
+      '│░░░░░│\n' +
+      '└─────┘'
+    );
+
+    // Test 9: Wide box 10x3
+    runTest('Wide 10x3 box', {
+      x: 0, y: 0, width: 10, height: 3,
+      style: 'single', shadow: false, text: '', textJustify: 'center-center'
+    }, 10, 3,
+      '┌────────┐\n' +
+      '│        │\n' +
+      '└────────┘'
+    );
+
+    // Test 10: Tall box 4x6
+    runTest('Tall 4x6 box', {
+      x: 0, y: 0, width: 4, height: 6,
+      style: 'single', shadow: false, text: '', textJustify: 'center-center'
+    }, 4, 6,
+      '┌──┐\n' +
+      '│  │\n' +
+      '│  │\n' +
+      '│  │\n' +
+      '│  │\n' +
+      '└──┘'
+    );
+
+    // Test 11: Interactive test - paste your JSON here
+    const interactiveDiv = document.createElement('div');
+    interactiveDiv.innerHTML = `
+      <h2>Interactive Test</h2>
+      <p>Paste a box object JSON to test:</p>
+      <textarea id="json-input" style="width:100%;height:100px;background:#000;color:#fff;font-family:monospace;">{"x":0,"y":0,"width":5,"height":3,"style":"single","shadow":false,"text":"","textJustify":"center-center"}</textarea>
+      <br>
+      <label>Page width: <input type="number" id="page-w" value="20" style="width:60px"></label>
+      <label>Page height: <input type="number" id="page-h" value="10" style="width:60px"></label>
+      <button id="run-test" style="margin:10px;padding:5px 15px;">Run Test</button>
+      <h4>Output:</h4>
+      <pre id="interactive-output" style="background:#000;padding:10px;min-height:100px;"></pre>
+      <h4>Character Analysis (shows each char with position):</h4>
+      <pre id="char-analysis" style="background:#000;padding:10px;font-size:11px;"></pre>
+    `;
+    results.appendChild(interactiveDiv);
+
+    document.getElementById('run-test').addEventListener('click', () => {
+      try {
+        const box = JSON.parse(document.getElementById('json-input').value);
+        const pageW = parseInt(document.getElementById('page-w').value);
+        const pageH = parseInt(document.getElementById('page-h').value);
+        const buffer = createBuffer(pageW, pageH);
+        renderBoxToBuffer(buffer, box);
+        const output = bufferToString(buffer);
+        document.getElementById('interactive-output').textContent = output;
+
+        // Character analysis
+        let analysis = '';
+        buffer.forEach((row, r) => {
+          analysis += `Row ${r}: `;
+          row.forEach((char, c) => {
+            if (char !== ' ') {
+              analysis += `[${c}:'${char}'(${char.charCodeAt(0)})] `;
+            }
+          });
+          analysis += '\n';
+        });
+        document.getElementById('char-analysis').textContent = analysis;
+      } catch (e) {
+        document.getElementById('interactive-output').textContent = 'Error: ' + e.message;
+      }
+    });
+
+    // Summary
+    const summary = document.createElement('h2');
+    summary.textContent = `Results: ${passCount} passed, ${failCount} failed`;
+    summary.style.color = failCount === 0 ? '#0a0' : '#a00';
+    results.insertBefore(summary, results.firstChild);
+
+    console.log(`Tests complete: ${passCount} passed, ${failCount} failed`);
+  </script>
+</body>
+</html>
