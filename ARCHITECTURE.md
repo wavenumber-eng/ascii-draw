@@ -30,70 +30,72 @@ AsciiEditor.core.CharacterGrid = class CharacterGrid {
 };
 ```
 
-### Directory Layout
+### Directory Layout (Current)
 
 ```
 ascii_draw/
 ├── js/
 │   ├── core/
-│   │   ├── utils.js              # AsciiEditor.core.utils (generateId, clamp, deepClone)
+│   │   ├── utils.js              # AsciiEditor.core (generateId, clamp, deepClone)
 │   │   ├── CharacterGrid.js      # AsciiEditor.core.CharacterGrid
 │   │   ├── Command.js            # AsciiEditor.core.Command (base + all commands)
 │   │   ├── HistoryManager.js     # AsciiEditor.core.HistoryManager
-│   │   └── State.js              # AsciiEditor.core.createInitialState
+│   │   ├── State.js              # AsciiEditor.core.createInitialState
+│   │   └── HotkeyManager.js      # AsciiEditor.core.HotkeyManager
 │   │
 │   ├── tools/
 │   │   ├── Tool.js               # AsciiEditor.tools.Tool (base class)
 │   │   ├── ToolManager.js        # AsciiEditor.tools.ToolManager
-│   │   ├── SelectTool.js         # AsciiEditor.tools.SelectTool
-│   │   ├── BoxTool.js            # AsciiEditor.tools.BoxTool
-│   │   ├── TextTool.js           # AsciiEditor.tools.TextTool
-│   │   ├── LineTool.js           # AsciiEditor.tools.LineTool
-│   │   ├── SymbolTool.js         # AsciiEditor.tools.SymbolTool
-│   │   ├── WireTool.js           # AsciiEditor.tools.WireTool
-│   │   ├── PortTool.js           # AsciiEditor.tools.PortTool
-│   │   └── PowerTool.js          # AsciiEditor.tools.PowerTool
-│   │
-│   ├── objects/
-│   │   ├── ObjectRegistry.js     # AsciiEditor.objects.Registry
-│   │   ├── Box.js                # AsciiEditor.objects.Box
-│   │   ├── Text.js               # AsciiEditor.objects.Text
-│   │   ├── Line.js               # AsciiEditor.objects.Line
-│   │   ├── Connector.js          # AsciiEditor.objects.Connector
-│   │   ├── Symbol.js             # AsciiEditor.objects.Symbol
-│   │   ├── Wire.js               # AsciiEditor.objects.Wire
-│   │   ├── Port.js               # AsciiEditor.objects.Port
-│   │   ├── PowerSymbol.js        # AsciiEditor.objects.PowerSymbol
-│   │   ├── Interface.js          # AsciiEditor.objects.Interface
-│   │   └── HierarchicalBlock.js  # AsciiEditor.objects.HierarchicalBlock
-│   │
-│   ├── ui/
-│   │   ├── PropertiesPanel.js    # AsciiEditor.ui.PropertiesPanel
-│   │   ├── Toolbar.js            # AsciiEditor.ui.Toolbar
-│   │   ├── PageTabs.js           # AsciiEditor.ui.PageTabs
-│   │   ├── StatusBar.js          # AsciiEditor.ui.StatusBar
-│   │   └── InlineEditor.js       # AsciiEditor.ui.InlineEditor
+│   │   ├── SelectTool.js         # AsciiEditor.tools.SelectTool [TOOL-20]
+│   │   └── BoxTool.js            # AsciiEditor.tools.BoxTool [TOOL-21]
 │   │
 │   ├── rendering/
-│   │   ├── Renderer.js           # AsciiEditor.rendering.Renderer
-│   │   └── GridRenderer.js       # AsciiEditor.rendering.GridRenderer
-│   │
-│   ├── export/
-│   │   ├── AsciiExporter.js      # AsciiEditor.export.AsciiExporter
-│   │   ├── AnsiExporter.js       # AsciiEditor.export.AnsiExporter
-│   │   ├── HtmlExporter.js       # AsciiEditor.export.HtmlExporter
-│   │   └── SvgExporter.js        # AsciiEditor.export.SvgExporter
+│   │   └── Renderer.js           # AsciiEditor.rendering.Renderer
 │   │
 │   ├── Editor.js                 # AsciiEditor.Editor (main orchestrator)
 │   └── main.js                   # Bootstrap, create editor instance
 │
-├── style.css
-├── index.html                    # Development (multiple script tags)
-├── ascii_editor.html             # Current monolithic version (kept for reference)
-└── docs/
-    ├── REQUIREMENTS.md
-    ├── ARCHITECTURE.md
-    └── STATUS.md
+├── style.css                     # External stylesheet with CSS variables
+├── index.html                    # Entry point (multiple script tags)
+├── ascii_editor.html             # Legacy monolithic version (reference only)
+│
+├── BerkeleyMono-Regular.ttf      # Font files
+├── BerkeleyMono-Regular.woff2
+│
+├── REQUIREMENTS.md               # What the product does (with status)
+├── ARCHITECTURE.md               # How the code is structured
+├── CLAUDE.md                     # Development guidelines
+└── .gitignore
+```
+
+### Future Directories (Not Yet Created)
+
+These directories will be added as features are implemented:
+
+```
+js/
+├── tools/
+│   ├── TextTool.js           # [TOOL-22] - not implemented
+│   ├── LineTool.js           # [TOOL-23] - not implemented
+│   ├── SymbolTool.js         # [TOOL-24] - not implemented
+│   ├── WireTool.js           # [TOOL-25] - not implemented
+│   ├── PortTool.js           # [TOOL-26] - not implemented
+│   └── PowerTool.js          # [TOOL-27] - not implemented
+│
+├── objects/                  # Object type definitions (future)
+│   ├── ObjectRegistry.js
+│   ├── Box.js, Text.js, Line.js, etc.
+│
+├── ui/                       # UI components (future extraction)
+│   ├── PropertiesPanel.js
+│   ├── Toolbar.js
+│   └── PageTabs.js
+│
+└── export/                   # Export formats (future)
+    ├── AsciiExporter.js
+    ├── AnsiExporter.js
+    ├── HtmlExporter.js
+    └── SvgExporter.js
 ```
 
 ### Script Loading Order
@@ -509,3 +511,52 @@ Or inline into HTML manually. The namespace pattern (`AsciiEditor.*`) ensures no
 - Behavior lives in class static methods
 - Easy to add new object types
 - No prototype chain complexity in serialization
+
+---
+
+## 11. CSS Variables Reference
+
+All colors are defined via CSS variables for easy theming:
+
+```css
+/* Backgrounds */
+--bg-primary: #1e1e1e;      /* Main UI background */
+--bg-secondary: #252526;    /* Panel backgrounds */
+--bg-tertiary: #2d2d30;     /* Hover/active states */
+--bg-canvas: #1a1a1a;       /* Drawing canvas */
+--bg-grid: #2a2a2a;         /* Grid lines */
+
+/* Text */
+--text-primary: #cccccc;    /* Main text */
+--text-secondary: #858585;  /* Muted/secondary text */
+--text-canvas: #cccccc;     /* Text on canvas */
+--text-shadow: #555555;     /* Shadow characters */
+
+/* Accents */
+--accent: #007acc;          /* Primary accent (selection, links) */
+--accent-secondary: #00cc7a; /* Secondary accent (intersect mode) */
+
+/* Selection & Marquee */
+--selection-stroke: #007acc;
+--marquee-enclosed-stroke: #007acc;
+--marquee-enclosed-fill: rgba(0, 122, 204, 0.1);
+--marquee-intersect-stroke: #00cc7a;
+--marquee-intersect-fill: rgba(0, 204, 122, 0.1);
+
+/* Borders */
+--border-color: #3c3c3c;
+--border-focus: #007acc;
+```
+
+### Usage in JavaScript
+
+```javascript
+const styles = getComputedStyle(document.documentElement);
+const accent = styles.getPropertyValue('--accent').trim();
+```
+
+### Character Dimensions
+
+Berkeley Mono at 16px renders:
+- Character width: ~10px (measured dynamically)
+- Character height: 20px
