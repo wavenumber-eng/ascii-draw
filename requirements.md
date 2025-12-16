@@ -214,27 +214,27 @@ The Properties Panel supports editing common properties across multiple selected
 
 | Status | ID | Type | Display Format | Example |
 |--------|-----|------|----------------|---------|
-| [ ] | **MSE-10** | Number | Range: `min...max` | `10...25` |
+| [x] | **MSE-10** | Number | Range: `min...max` | `10...25` |
 | [x] | **MSE-11** | Text | Placeholder: `...` | `...` |
 | [x] | **MSE-12** | Boolean | Indeterminate checkbox | `[■]` |
-| [ ] | **MSE-13** | Enum (select) | First value + asterisk | `single*` |
-| [ ] | **MSE-14** | Enum (buttons) | Dashed border on first value's button | — |
+| [x] | **MSE-13** | Enum (select) | First value + asterisk | `single*` |
+| [x] | **MSE-14** | Enum (buttons) | Dashed border on first value's button | — |
 
 #### Initialize from First Object on Focus
 
 When user focuses a mixed field, auto-populate to enable quick editing:
 
-- [ ] **MSE-20**: Focus mixed **number** input → populate with **min value**, select all text
-- [ ] **MSE-21**: Focus mixed **text** input → populate with **first object's value**, select all text
+- [x] **MSE-20**: Focus mixed **number** input → populate with **min value**, select all text
+- [x] **MSE-21**: Focus mixed **text** input → populate with **first object's value**, select all text
 - [x] **MSE-22**: Click mixed **checkbox** → apply clicked state to all objects
 - [x] **MSE-23**: Select from mixed **dropdown** → apply selected value to all objects
 - [x] **MSE-24**: Click mixed **button grid** → apply clicked value to all objects
 
 #### Data Attributes for Mixed Fields
 
-- [ ] **MSE-25**: Number inputs store `data-min-value` and `data-first-value` attributes
-- [ ] **MSE-26**: Text inputs store `data-first-value` attribute
-- [ ] **MSE-27**: These attributes enable focus handlers to populate fields
+- [x] **MSE-25**: Number inputs store `data-min-value` and `data-first-value` attributes
+- [x] **MSE-26**: Text inputs store `data-first-value` attribute
+- [x] **MSE-27**: These attributes enable focus handlers to populate fields
 
 #### Batch Updates
 
@@ -245,13 +245,13 @@ When user focuses a mixed field, auto-populate to enable quick editing:
 #### Selection Order & Value Computation
 
 - [x] **MSE-40**: First selected = first in selection ID array (order preserved)
-- [ ] **MSE-41**: `getCommonPropertyValue()` returns `firstValue` from first object
-- [ ] **MSE-42**: `getCommonPropertyValue()` computes `minValue`/`maxValue` for numbers
+- [x] **MSE-41**: `getCommonPropertyValue()` returns `firstValue` from first object
+- [x] **MSE-42**: `getCommonPropertyValue()` computes `minValue`/`maxValue` for numbers
 
 #### CSS Classes
 
-- [ ] **MSE-45**: `.mixed` class on inputs: colored border, italic placeholder
-- [ ] **MSE-46**: `.mixed-first` class on justify buttons: dashed border, accent color
+- [x] **MSE-45**: `.mixed` class on inputs: colored border, italic placeholder
+- [x] **MSE-46**: `.mixed-first` class on justify buttons: dashed border, accent color
 
 #### Supported Properties
 
@@ -430,7 +430,7 @@ When user focuses a mixed field, auto-populate to enable quick editing:
 | Tools (TOOL) | 2 | 8 | 25% |
 | Objects (OBJ) | 15 | 55 | 27% |
 | Selection (SEL) | 20 | 20 | 100% |
-| Multi-Select Edit (MSE) | 13 | 25 | 52% |
+| Multi-Select Edit (MSE) | 25 | 25 | 100% |
 | User Interface (UI) | 18 | 18 | 100% |
 | Data Model (DATA) | 7 | 12 | 58% |
 | Export (EXP) | 2 | 12 | 17% |
@@ -438,14 +438,7 @@ When user focuses a mixed field, auto-populate to enable quick editing:
 
 ### Next Priority
 
-1. **MSE enhancements** - Complete multi-select property editing:
-   - MSE-41, MSE-42: Enhance `getCommonPropertyValue()` with firstValue/min/max
-   - MSE-10: Number range placeholder `10...25`
-   - MSE-13: Enum select placeholder `single*`
-   - MSE-14, MSE-46: Justify button dashed border for mixed-first
-   - MSE-25, MSE-26, MSE-27: Data attributes for first/min values
-   - MSE-20, MSE-21: Focus handlers to populate from first/min
-   - MSE-45: CSS styling for mixed class
-2. TOOL-22 (TextTool) - Free-floating text objects
-3. TOOL-23 (LineTool) - Lines with arrows
-4. Copy/paste support
+1. TOOL-22 (TextTool) - Free-floating text objects
+2. TOOL-23 (LineTool) - Lines with arrows
+3. Copy/paste support
+4. TOOL-24 (SymbolTool) - Pin/node boxes for schematic symbols

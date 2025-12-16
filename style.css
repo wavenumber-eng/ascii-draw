@@ -430,6 +430,17 @@ kbd {
   color: white;
 }
 
+/* MSE-14, MSE-46: Mixed-first state for justify buttons */
+.justify-btn.mixed-first {
+  background: transparent;
+  border: 2px dashed var(--accent);
+  color: var(--accent);
+}
+
+.justify-btn.mixed-first:hover {
+  background: var(--bg-tertiary);
+}
+
 /* ========== Inline Editor ========== */
 #inline-editor {
   position: absolute;

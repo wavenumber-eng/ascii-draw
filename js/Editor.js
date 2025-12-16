@@ -343,21 +343,35 @@ AsciiEditor.Editor = class Editor {
     }
   }
 
+  // MSE-1, MSE-2, MSE-40, MSE-41, MSE-42: Enhanced property value detection
   getCommonPropertyValue(objects, prop) {
     if (objects.length === 0) return { value: null, mixed: false };
 
-    const firstValue = objects[0][prop];
-    const allSame = objects.every(obj => {
-      const val = obj[prop];
+    const values = objects.map(obj => obj[prop]);
+    const firstValue = values[0];
+    const allSame = values.every(val => {
       if (val === firstValue) return true;
       if (val === undefined && firstValue === undefined) return true;
       if (val === '' && firstValue === '') return true;
       return false;
     });
 
+    if (allSame) {
+      return { value: firstValue, mixed: false };
+    }
+
+    // MSE-42: Compute min/max for numeric values
+    const numericValues = values.filter(v => typeof v === 'number');
+    const minValue = numericValues.length > 0 ? Math.min(...numericValues) : null;
+    const maxValue = numericValues.length > 0 ? Math.max(...numericValues) : null;
+
+    // MSE-40, MSE-41: Return first value and range for mixed state
     return {
-      value: allSame ? firstValue : null,
-      mixed: !allSame
+      value: null,
+      mixed: true,
+      firstValue: firstValue,
+      minValue: minValue,
+      maxValue: maxValue
     };
   }
 
@@ -379,12 +393,52 @@ AsciiEditor.Editor = class Editor {
       text: this.getCommonPropertyValue(objects, 'text')
     };
 
+    // Helper functions for rendering
     const inputValue = (prop) => prop.mixed ? '' : (prop.value ?? '');
-    const inputPlaceholder = (prop, defaultPlaceholder = '') => prop.mixed ? '...' : defaultPlaceholder;
+
+    // MSE-10: Number placeholder shows range format min...max
+    const numberPlaceholder = (prop) => {
+      if (!prop.mixed) return '';
+      if (prop.minValue !== null && prop.maxValue !== null) {
+        if (prop.minValue === prop.maxValue) return `${prop.minValue}`;
+        return `${prop.minValue}...${prop.maxValue}`;
+      }
+      return '...';
+    };
+
+    // MSE-11: Text placeholder stays as ...
+    const textPlaceholder = (prop, defaultPlaceholder = '') => prop.mixed ? '...' : defaultPlaceholder;
+
+    // MSE-13: Enum placeholder shows first value + asterisk
+    const enumPlaceholder = (prop) => {
+      if (!prop.mixed) return '';
+      return `${prop.firstValue}*`;
+    };
+
     const selectValue = (prop, defaultVal) => prop.mixed ? '' : (prop.value ?? defaultVal);
+
+    // MSE-12: Checkbox indeterminate state
     const checkboxState = (prop) => {
       if (prop.mixed) return { checked: false, indeterminate: true };
       return { checked: !!prop.value, indeterminate: false };
+    };
+
+    // MSE-14: Justify button class - active, mixed-first, or empty
+    const justifyBtnClass = (justify, prop) => {
+      if (!prop.mixed && prop.value === justify) return 'active';
+      if (prop.mixed && prop.firstValue === justify) return 'mixed-first';
+      return '';
+    };
+
+    // MSE-25, MSE-26: Data attributes for first/min values
+    const numberDataAttrs = (prop) => {
+      if (!prop.mixed) return '';
+      return `data-min-value="${prop.minValue ?? ''}" data-first-value="${prop.firstValue ?? ''}"`;
+    };
+
+    const textDataAttrs = (prop) => {
+      if (!prop.mixed) return '';
+      return `data-first-value="${(prop.firstValue || '').replace(/"/g, '&quot;')}"`;
     };
 
     const shadowState = checkboxState(props.shadow);
@@ -399,12 +453,12 @@ AsciiEditor.Editor = class Editor {
         <div class="property-row">
           <span class="property-label">X</span>
           <input type="number" class="property-input ${props.x.mixed ? 'mixed' : ''}" id="prop-x"
-            value="${inputValue(props.x)}" placeholder="${inputPlaceholder(props.x)}">
+            value="${inputValue(props.x)}" placeholder="${numberPlaceholder(props.x)}" ${numberDataAttrs(props.x)}>
         </div>
         <div class="property-row">
           <span class="property-label">Y</span>
           <input type="number" class="property-input ${props.y.mixed ? 'mixed' : ''}" id="prop-y"
-            value="${inputValue(props.y)}" placeholder="${inputPlaceholder(props.y)}">
+            value="${inputValue(props.y)}" placeholder="${numberPlaceholder(props.y)}" ${numberDataAttrs(props.y)}>
         </div>
       </div>
 
@@ -413,12 +467,12 @@ AsciiEditor.Editor = class Editor {
         <div class="property-row">
           <span class="property-label">Width</span>
           <input type="number" class="property-input ${props.width.mixed ? 'mixed' : ''}" id="prop-width"
-            value="${inputValue(props.width)}" placeholder="${inputPlaceholder(props.width)}" min="3">
+            value="${inputValue(props.width)}" placeholder="${numberPlaceholder(props.width)}" min="3" ${numberDataAttrs(props.width)}>
         </div>
         <div class="property-row">
           <span class="property-label">Height</span>
           <input type="number" class="property-input ${props.height.mixed ? 'mixed' : ''}" id="prop-height"
-            value="${inputValue(props.height)}" placeholder="${inputPlaceholder(props.height)}" min="3">
+            value="${inputValue(props.height)}" placeholder="${numberPlaceholder(props.height)}" min="3" ${numberDataAttrs(props.height)}>
         </div>
       </div>
 
@@ -427,7 +481,7 @@ AsciiEditor.Editor = class Editor {
         <div class="property-row">
           <span class="property-label">Border</span>
           <select class="property-select ${props.style.mixed ? 'mixed' : ''}" id="prop-style">
-            ${props.style.mixed ? '<option value="" selected>...</option>' : ''}
+            ${props.style.mixed ? `<option value="" selected>${enumPlaceholder(props.style)}</option>` : ''}
             <option value="single" ${selectValue(props.style, 'single') === 'single' ? 'selected' : ''}>Single</option>
             <option value="double" ${selectValue(props.style, '') === 'double' ? 'selected' : ''}>Double</option>
             <option value="rounded" ${selectValue(props.style, '') === 'rounded' ? 'selected' : ''}>Rounded</option>
@@ -445,12 +499,12 @@ AsciiEditor.Editor = class Editor {
         <div class="property-group-title">Title</div>
         <div class="property-row">
           <input type="text" class="property-input ${props.title.mixed ? 'mixed' : ''}" id="prop-title"
-            value="${inputValue(props.title)}" placeholder="${inputPlaceholder(props.title, 'Box title')}">
+            value="${inputValue(props.title)}" placeholder="${textPlaceholder(props.title, 'Box title')}" ${textDataAttrs(props.title)}>
         </div>
         <div class="property-row">
           <span class="property-label">Position</span>
           <select class="property-select ${props.titlePosition.mixed ? 'mixed' : ''}" id="prop-titlePosition">
-            ${props.titlePosition.mixed ? '<option value="" selected>...</option>' : ''}
+            ${props.titlePosition.mixed ? `<option value="" selected>${enumPlaceholder(props.titlePosition)}</option>` : ''}
             <option value="top-left" ${selectValue(props.titlePosition, 'top-left') === 'top-left' ? 'selected' : ''}>Top Left</option>
             <option value="top-center" ${selectValue(props.titlePosition, '') === 'top-center' ? 'selected' : ''}>Top Center</option>
             <option value="top-right" ${selectValue(props.titlePosition, '') === 'top-right' ? 'selected' : ''}>Top Right</option>
@@ -462,7 +516,7 @@ AsciiEditor.Editor = class Editor {
         <div class="property-row">
           <span class="property-label">Mode</span>
           <select class="property-select ${props.titleMode.mixed ? 'mixed' : ''}" id="prop-titleMode">
-            ${props.titleMode.mixed ? '<option value="" selected>...</option>' : ''}
+            ${props.titleMode.mixed ? `<option value="" selected>${enumPlaceholder(props.titleMode)}</option>` : ''}
             <option value="border" ${selectValue(props.titleMode, 'border') === 'border' ? 'selected' : ''}>On Border</option>
             <option value="inside" ${selectValue(props.titleMode, '') === 'inside' ? 'selected' : ''}>Inside</option>
             <option value="outside" ${selectValue(props.titleMode, '') === 'outside' ? 'selected' : ''}>Outside</option>
@@ -476,18 +530,18 @@ AsciiEditor.Editor = class Editor {
           <span class="property-label">Justify</span>
         </div>
         <div class="justify-grid" id="justify-grid">
-          <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'top-left' ? 'active' : ''}" data-justify="top-left" title="Top Left">&#x2196;</button>
-          <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'top-center' ? 'active' : ''}" data-justify="top-center" title="Top Center">&#x2191;</button>
-          <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'top-right' ? 'active' : ''}" data-justify="top-right" title="Top Right">&#x2197;</button>
-          <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'center-left' ? 'active' : ''}" data-justify="center-left" title="Center Left">&#x2190;</button>
-          <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'center-center' ? 'active' : ''}" data-justify="center-center" title="Center">&#x25CF;</button>
-          <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'center-right' ? 'active' : ''}" data-justify="center-right" title="Center Right">&#x2192;</button>
-          <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'bottom-left' ? 'active' : ''}" data-justify="bottom-left" title="Bottom Left">&#x2199;</button>
-          <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'bottom-center' ? 'active' : ''}" data-justify="bottom-center" title="Bottom Center">&#x2193;</button>
-          <button class="justify-btn ${!props.textJustify.mixed && props.textJustify.value === 'bottom-right' ? 'active' : ''}" data-justify="bottom-right" title="Bottom Right">&#x2198;</button>
+          <button class="justify-btn ${justifyBtnClass('top-left', props.textJustify)}" data-justify="top-left" title="Top Left">&#x2196;</button>
+          <button class="justify-btn ${justifyBtnClass('top-center', props.textJustify)}" data-justify="top-center" title="Top Center">&#x2191;</button>
+          <button class="justify-btn ${justifyBtnClass('top-right', props.textJustify)}" data-justify="top-right" title="Top Right">&#x2197;</button>
+          <button class="justify-btn ${justifyBtnClass('center-left', props.textJustify)}" data-justify="center-left" title="Center Left">&#x2190;</button>
+          <button class="justify-btn ${justifyBtnClass('center-center', props.textJustify)}" data-justify="center-center" title="Center">&#x25CF;</button>
+          <button class="justify-btn ${justifyBtnClass('center-right', props.textJustify)}" data-justify="center-right" title="Center Right">&#x2192;</button>
+          <button class="justify-btn ${justifyBtnClass('bottom-left', props.textJustify)}" data-justify="bottom-left" title="Bottom Left">&#x2199;</button>
+          <button class="justify-btn ${justifyBtnClass('bottom-center', props.textJustify)}" data-justify="bottom-center" title="Bottom Center">&#x2193;</button>
+          <button class="justify-btn ${justifyBtnClass('bottom-right', props.textJustify)}" data-justify="bottom-right" title="Bottom Right">&#x2198;</button>
         </div>
         <textarea class="property-textarea ${props.text.mixed ? 'mixed' : ''}" id="prop-text"
-          placeholder="${inputPlaceholder(props.text, 'Text content')}">${inputValue(props.text)}</textarea>
+          placeholder="${textPlaceholder(props.text, 'Text content')}" ${textDataAttrs(props.text)}>${inputValue(props.text)}</textarea>
       </div>
     `;
 
@@ -496,13 +550,28 @@ AsciiEditor.Editor = class Editor {
       shadowCheck.indeterminate = true;
     }
 
-    this.wireMultiSelectListeners(objectIds);
+    this.wireMultiSelectListeners(objectIds, props);
   }
 
-  wireMultiSelectListeners(objectIds) {
+  wireMultiSelectListeners(objectIds, props) {
+    // MSE-20: Number inputs - focus handler to populate with min value
     ['x', 'y', 'width', 'height'].forEach(prop => {
       const input = document.getElementById(`prop-${prop}`);
       if (input) {
+        // Focus handler for mixed fields
+        if (input.classList.contains('mixed')) {
+          input.addEventListener('focus', () => {
+            if (input.value === '') {
+              const minValue = input.dataset.minValue;
+              if (minValue !== undefined && minValue !== '') {
+                input.value = minValue;
+                input.select();
+              }
+            }
+          });
+        }
+
+        // Change handler
         input.addEventListener('change', () => {
           const value = input.value;
           if (value === '') return;
@@ -530,8 +599,21 @@ AsciiEditor.Editor = class Editor {
       });
     }
 
+    // MSE-21: Text input - focus handler to populate with first value
     const titleInput = document.getElementById('prop-title');
     if (titleInput) {
+      if (titleInput.classList.contains('mixed')) {
+        titleInput.addEventListener('focus', () => {
+          if (titleInput.value === '') {
+            const firstValue = titleInput.dataset.firstValue;
+            if (firstValue !== undefined && firstValue !== '') {
+              titleInput.value = firstValue;
+              titleInput.select();
+            }
+          }
+        });
+      }
+
       titleInput.addEventListener('change', () => {
         this.updateMultipleObjectsProperty(objectIds, 'title', titleInput.value);
       });
@@ -559,8 +641,21 @@ AsciiEditor.Editor = class Editor {
       });
     });
 
+    // MSE-21: Textarea - focus handler to populate with first value
     const textArea = document.getElementById('prop-text');
     if (textArea) {
+      if (textArea.classList.contains('mixed')) {
+        textArea.addEventListener('focus', () => {
+          if (textArea.value === '') {
+            const firstValue = textArea.dataset.firstValue;
+            if (firstValue !== undefined) {
+              textArea.value = firstValue;
+              textArea.select();
+            }
+          }
+        });
+      }
+
       textArea.addEventListener('change', () => {
         this.updateMultipleObjectsProperty(objectIds, 'text', textArea.value);
       });
