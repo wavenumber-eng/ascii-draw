@@ -113,13 +113,15 @@ AsciiEditor.Editor = class Editor {
     // Register tools
     this.toolManager.register(new AsciiEditor.tools.SelectTool());
     this.toolManager.register(new AsciiEditor.tools.BoxTool());
+    this.toolManager.register(new AsciiEditor.tools.LineTool());
 
     // Set context
     this.toolManager.setContext({
       canvas: this.canvas,
       grid: this.grid,
       history: this.history,
-      startInlineEdit: (obj, initialChar) => this.startInlineEdit(obj, initialChar)
+      startInlineEdit: (obj, initialChar) => this.startInlineEdit(obj, initialChar),
+      setTool: (toolName) => this.setTool(toolName)
     });
 
     // Activate default tool
@@ -176,6 +178,9 @@ AsciiEditor.Editor = class Editor {
     this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
     this.canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
     this.canvas.addEventListener('dblclick', (e) => this.handleDoubleClick(e));
+
+    // Prevent context menu on canvas (right-click used for tool actions)
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // Keyboard events
     document.addEventListener('keydown', (e) => this.handleKeyDown(e));
@@ -366,6 +371,8 @@ AsciiEditor.Editor = class Editor {
       const obj = selectedObjects[0];
       if (obj.type === 'box') {
         this.renderBoxProperties(obj);
+      } else if (obj.type === 'line') {
+        this.renderLineProperties(obj);
       } else {
         content.innerHTML = `<div class="property-empty">Unknown object type</div>`;
       }
@@ -798,6 +805,96 @@ AsciiEditor.Editor = class Editor {
       // UI-14: Real-time updates as user types
       textArea.addEventListener('input', () => {
         this.updateObjectProperty(obj.id, 'text', textArea.value);
+      });
+    }
+  }
+
+  // Line properties panel
+  renderLineProperties(obj) {
+    const content = document.getElementById('properties-content');
+    const style = obj.style || 'single';
+    const startCap = obj.startCap || 'none';
+    const endCap = obj.endCap || 'none';
+    const pointCount = obj.points ? obj.points.length : 0;
+
+    content.innerHTML = `
+      <div class="property-group">
+        <div class="property-group-title">Line Info</div>
+        <div class="property-row">
+          <span class="property-label">Points</span>
+          <span class="property-value">${pointCount}</span>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Style</div>
+        <div class="property-row">
+          <span class="property-label">Line Style</span>
+          <select class="property-select" id="prop-style">
+            <option value="single" ${style === 'single' ? 'selected' : ''}>─ Single</option>
+            <option value="double" ${style === 'double' ? 'selected' : ''}>═ Double</option>
+            <option value="thick" ${style === 'thick' ? 'selected' : ''}>█ Thick</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Endpoints</div>
+        <div class="property-row">
+          <span class="property-label">Start</span>
+          <select class="property-select" id="prop-startCap">
+            <option value="none" ${startCap === 'none' ? 'selected' : ''}>None</option>
+            <option value="arrow" ${startCap === 'arrow' ? 'selected' : ''}>&lt; Arrow</option>
+            <option value="triangle" ${startCap === 'triangle' ? 'selected' : ''}>◀ Triangle</option>
+            <option value="triangle-outline" ${startCap === 'triangle-outline' ? 'selected' : ''}>◁ Triangle Outline</option>
+            <option value="diamond" ${startCap === 'diamond' ? 'selected' : ''}>◆ Diamond</option>
+            <option value="diamond-outline" ${startCap === 'diamond-outline' ? 'selected' : ''}>◇ Diamond Outline</option>
+            <option value="circle" ${startCap === 'circle' ? 'selected' : ''}>● Circle</option>
+            <option value="circle-outline" ${startCap === 'circle-outline' ? 'selected' : ''}>○ Circle Outline</option>
+            <option value="square" ${startCap === 'square' ? 'selected' : ''}>■ Square</option>
+            <option value="square-outline" ${startCap === 'square-outline' ? 'selected' : ''}>□ Square Outline</option>
+          </select>
+        </div>
+        <div class="property-row">
+          <span class="property-label">End</span>
+          <select class="property-select" id="prop-endCap">
+            <option value="none" ${endCap === 'none' ? 'selected' : ''}>None</option>
+            <option value="arrow" ${endCap === 'arrow' ? 'selected' : ''}>&gt; Arrow</option>
+            <option value="triangle" ${endCap === 'triangle' ? 'selected' : ''}>▶ Triangle</option>
+            <option value="triangle-outline" ${endCap === 'triangle-outline' ? 'selected' : ''}>▷ Triangle Outline</option>
+            <option value="diamond" ${endCap === 'diamond' ? 'selected' : ''}>◆ Diamond</option>
+            <option value="diamond-outline" ${endCap === 'diamond-outline' ? 'selected' : ''}>◇ Diamond Outline</option>
+            <option value="circle" ${endCap === 'circle' ? 'selected' : ''}>● Circle</option>
+            <option value="circle-outline" ${endCap === 'circle-outline' ? 'selected' : ''}>○ Circle Outline</option>
+            <option value="square" ${endCap === 'square' ? 'selected' : ''}>■ Square</option>
+            <option value="square-outline" ${endCap === 'square-outline' ? 'selected' : ''}>□ Square Outline</option>
+          </select>
+        </div>
+      </div>
+    `;
+
+    this.wireLinePropertyListeners(obj);
+  }
+
+  wireLinePropertyListeners(obj) {
+    const styleSelect = document.getElementById('prop-style');
+    if (styleSelect) {
+      styleSelect.addEventListener('change', () => {
+        this.updateObjectProperty(obj.id, 'style', styleSelect.value);
+      });
+    }
+
+    const startCapSelect = document.getElementById('prop-startCap');
+    if (startCapSelect) {
+      startCapSelect.addEventListener('change', () => {
+        this.updateObjectProperty(obj.id, 'startCap', startCapSelect.value);
+      });
+    }
+
+    const endCapSelect = document.getElementById('prop-endCap');
+    if (endCapSelect) {
+      endCapSelect.addEventListener('change', () => {
+        this.updateObjectProperty(obj.id, 'endCap', endCapSelect.value);
       });
     }
   }
@@ -1270,6 +1367,8 @@ AsciiEditor.Editor = class Editor {
   renderObjectToBuffer(buffer, obj) {
     if (obj.type === 'box') {
       this.renderBoxToBuffer(buffer, obj);
+    } else if (obj.type === 'line') {
+      this.renderLineToBuffer(buffer, obj);
     }
   }
 
@@ -1378,6 +1477,109 @@ AsciiEditor.Editor = class Editor {
           setChar(textX + j, startY + i, displayLine[j]);
         }
       });
+    }
+  }
+
+  renderLineToBuffer(buffer, obj) {
+    const { points, style, startCap, endCap } = obj;
+    if (!points || points.length < 2) return;
+
+    const lineChars = {
+      single: { h: '─', v: '│', tl: '┌', tr: '┐', bl: '└', br: '┘' },
+      double: { h: '═', v: '║', tl: '╔', tr: '╗', bl: '╚', br: '╝' },
+      thick:  { h: '█', v: '█', tl: '█', tr: '█', bl: '█', br: '█' }
+    };
+    const chars = lineChars[style] || lineChars.single;
+
+    const setChar = (col, row, char) => {
+      if (row >= 0 && row < buffer.length && col >= 0 && col < buffer[0].length) {
+        buffer[row][col] = char;
+      }
+    };
+
+    const getDirection = (from, to) => {
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      if (dx > 0) return 'right';
+      if (dx < 0) return 'left';
+      if (dy > 0) return 'down';
+      if (dy < 0) return 'up';
+      return 'none';
+    };
+
+    // Draw each segment
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const dx = Math.sign(p2.x - p1.x);
+      const dy = Math.sign(p2.y - p1.y);
+
+      if (dx !== 0 && dy === 0) {
+        // Horizontal segment
+        const startX = Math.min(p1.x, p2.x);
+        const endX = Math.max(p1.x, p2.x);
+        for (let x = startX; x <= endX; x++) {
+          setChar(x, p1.y, chars.h);
+        }
+      } else if (dy !== 0 && dx === 0) {
+        // Vertical segment
+        const startY = Math.min(p1.y, p2.y);
+        const endY = Math.max(p1.y, p2.y);
+        for (let y = startY; y <= endY; y++) {
+          setChar(p1.x, y, chars.v);
+        }
+      }
+    }
+
+    // Draw corners at intermediate points
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+
+      const inDir = getDirection(prev, curr);
+      const outDir = getDirection(curr, next);
+
+      const cornerMap = {
+        'right-down': chars.tr,
+        'right-up': chars.br,
+        'left-down': chars.tl,
+        'left-up': chars.bl,
+        'down-right': chars.bl,
+        'down-left': chars.br,
+        'up-right': chars.tl,
+        'up-left': chars.tr
+      };
+
+      const cornerChar = cornerMap[`${inDir}-${outDir}`];
+      if (cornerChar) {
+        setChar(curr.x, curr.y, cornerChar);
+      }
+    }
+
+    // Draw endpoint caps
+    const caps = {
+      arrow: { right: '>', left: '<', down: 'v', up: '^' },
+      triangle: { right: '▶', left: '◀', down: '▼', up: '▲' },
+      'triangle-outline': { right: '▷', left: '◁', down: '▽', up: '△' },
+      diamond: { right: '◆', left: '◆', down: '◆', up: '◆' },
+      'diamond-outline': { right: '◇', left: '◇', down: '◇', up: '◇' },
+      circle: { right: '●', left: '●', down: '●', up: '●' },
+      'circle-outline': { right: '○', left: '○', down: '○', up: '○' },
+      square: { right: '■', left: '■', down: '■', up: '■' },
+      'square-outline': { right: '□', left: '□', down: '□', up: '□' }
+    };
+
+    if (startCap && startCap !== 'none' && caps[startCap]) {
+      const dir = getDirection(points[0], points[1]);
+      const capChar = caps[startCap][dir];
+      if (capChar) setChar(points[0].x, points[0].y, capChar);
+    }
+
+    if (endCap && endCap !== 'none' && caps[endCap]) {
+      const dir = getDirection(points[points.length - 2], points[points.length - 1]);
+      const capChar = caps[endCap][dir];
+      if (capChar) setChar(points[points.length - 1].x, points[points.length - 1].y, capChar);
     }
   }
 };

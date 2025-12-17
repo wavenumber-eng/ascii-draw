@@ -292,6 +292,11 @@ kbd {
   min-width: 60px;
 }
 
+.property-value {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
 .property-input {
   flex: 1;
   font-family: var(--font-mono);

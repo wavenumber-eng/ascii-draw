@@ -11,7 +11,8 @@ const SelectMode = {
   NONE: 'none',
   DRAGGING: 'dragging',           // Moving selected object(s)
   MARQUEE: 'marquee',             // Drawing selection rectangle
-  RESIZING: 'resizing'            // Resizing single object
+  RESIZING: 'resizing',           // Resizing single object (boxes)
+  LINE_POINT: 'line_point'        // Dragging a line point
 };
 
 // Resize handle positions
@@ -33,6 +34,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.mode = SelectMode.NONE;
     this.dragStart = null;
     this.dragCurrent = null;
+    // Line point dragging state
+    this.linePointIndex = null;     // Index of point being dragged
+    this.lineOriginalPoints = null; // Original points array for undo
     this.draggedIds = [];
     this.originalPositions = {};
     this.activeHandle = null;
@@ -58,6 +62,8 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.activeHandle = null;
     this.resizeOriginal = null;
     this.addToSelection = false;
+    this.linePointIndex = null;
+    this.lineOriginalPoints = null;
   }
 
   onMouseDown(event, context) {
@@ -71,10 +77,19 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (state.selection.ids.length === 1) {
       const handle = this.hitTestHandle(event.canvasX, event.canvasY, context);
       if (handle) {
-        this.mode = SelectMode.RESIZING;
-        this.activeHandle = handle.position;
-        this.resizeOriginal = { ...handle.obj };
-        return true;
+        if (handle.type === 'line_point') {
+          // Start dragging a line point
+          this.mode = SelectMode.LINE_POINT;
+          this.linePointIndex = handle.pointIndex;
+          this.lineOriginalPoints = handle.obj.points.map(p => ({ ...p }));
+          return true;
+        } else if (handle.type === 'box_corner') {
+          // Start resizing a box
+          this.mode = SelectMode.RESIZING;
+          this.activeHandle = handle.position;
+          this.resizeOriginal = { ...handle.obj };
+          return true;
+        }
       }
     }
 
@@ -175,6 +190,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       return true;
     }
 
+    if (this.mode === SelectMode.LINE_POINT && this.linePointIndex !== null) {
+      this.performLinePointDrag(col, row, context);
+      return true;
+    }
+
     if (this.mode === SelectMode.MARQUEE) {
       return true;  // Just redraw to show marquee
     }
@@ -184,7 +204,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (state.selection.ids.length === 1) {
       const handle = this.hitTestHandle(event.canvasX, event.canvasY, context);
       if (handle) {
-        context.canvas.style.cursor = this.getHandleCursor(handle.position);
+        if (handle.type === 'line_point') {
+          context.canvas.style.cursor = 'move';
+        } else {
+          context.canvas.style.cursor = this.getHandleCursor(handle.position);
+        }
         return false;
       }
     }
@@ -238,6 +262,10 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     if (this.mode === SelectMode.RESIZING && this.resizeOriginal) {
       this.finalizeResize(context);
+    }
+
+    if (this.mode === SelectMode.LINE_POINT && this.lineOriginalPoints) {
+      this.finalizeLinePointDrag(context);
     }
 
     if (this.mode === SelectMode.MARQUEE) {
@@ -396,6 +424,71 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     }
   }
 
+  // OBJ-3C: Drag line point to move vertex
+  performLinePointDrag(col, row, context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+    if (!obj || obj.type !== 'line' || !obj.points) return;
+
+    // Update the point position directly in state
+    context.history.updateState(s => {
+      const newState = AsciiEditor.core.deepClone(s);
+      const pg = newState.project.pages.find(p => p.id === s.activePageId);
+      if (pg) {
+        const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
+        if (lineObj && lineObj.points && lineObj.points[this.linePointIndex]) {
+          lineObj.points[this.linePointIndex].x = col;
+          lineObj.points[this.linePointIndex].y = row;
+        }
+      }
+      return newState;
+    });
+  }
+
+  finalizeLinePointDrag(context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+    if (!obj || obj.type !== 'line' || !obj.points) return;
+
+    const origPoints = this.lineOriginalPoints;
+    const newPoints = obj.points.map(p => ({ ...p }));
+
+    // Check if points changed
+    const hasChanged = origPoints.some((orig, i) => {
+      const curr = newPoints[i];
+      return orig.x !== curr.x || orig.y !== curr.y;
+    });
+
+    if (hasChanged) {
+      // Restore original
+      context.history.updateState(s => {
+        const newState = AsciiEditor.core.deepClone(s);
+        const pg = newState.project.pages.find(p => p.id === s.activePageId);
+        if (pg) {
+          const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
+          if (lineObj) {
+            lineObj.points = origPoints.map(p => ({ ...p }));
+          }
+        }
+        return newState;
+      });
+
+      // Execute command for undo/redo
+      context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+        state.activePageId,
+        obj.id,
+        { points: origPoints },
+        { points: newPoints }
+      ));
+    }
+  }
+
   // SEL-1 to SEL-4: Marquee selection
   performMarqueeSelect(context) {
     if (!this.dragStart || !this.dragCurrent) return;
@@ -475,11 +568,28 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     const obj = page.objects.find(o => o.id === state.selection.ids[0]);
     if (!obj) return null;
 
+    const handleSize = 8;
+
+    // Line point handles
+    if (obj.type === 'line' && obj.points) {
+      for (let i = 0; i < obj.points.length; i++) {
+        const point = obj.points[i];
+        const pixel = context.grid.charToPixel(point.x, point.y);
+        const centerX = pixel.x + context.grid.charWidth / 2;
+        const centerY = pixel.y + context.grid.charHeight / 2;
+
+        if (Math.abs(pixelX - centerX) <= handleSize && Math.abs(pixelY - centerY) <= handleSize) {
+          return { type: 'line_point', pointIndex: i, obj };
+        }
+      }
+      return null;
+    }
+
+    // Box corner handles
     const { x, y } = context.grid.charToPixel(obj.x, obj.y);
     const width = (obj.width || 10) * context.grid.charWidth;
     const height = (obj.height || 3) * context.grid.charHeight;
 
-    const handleSize = 8;
     const handles = [
       { position: HandlePosition.TOP_LEFT, hx: x, hy: y },
       { position: HandlePosition.TOP_RIGHT, hx: x + width, hy: y },
@@ -489,7 +599,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     for (const h of handles) {
       if (Math.abs(pixelX - h.hx) <= handleSize && Math.abs(pixelY - h.hy) <= handleSize) {
-        return { position: h.position, obj };
+        return { type: 'box_corner', position: h.position, obj };
       }
     }
 
@@ -510,10 +620,81 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   objectContainsPoint(obj, col, row) {
+    if (obj.type === 'line') {
+      return this.lineContainsPoint(obj, col, row);
+    }
+    // Default: rectangular bounds (boxes, etc.)
     const width = obj.width || 10;
     const height = obj.height || 3;
     return col >= obj.x && col < obj.x + width &&
            row >= obj.y && row < obj.y + height;
+  }
+
+  // Hit testing for line objects
+  lineContainsPoint(obj, col, row) {
+    if (!obj.points || obj.points.length < 2) return false;
+
+    // Check each segment
+    for (let i = 0; i < obj.points.length - 1; i++) {
+      const p1 = obj.points[i];
+      const p2 = obj.points[i + 1];
+
+      if (this.pointOnSegment(col, row, p1, p2)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Check if a point is on a horizontal or vertical segment
+  pointOnSegment(col, row, p1, p2) {
+    const minX = Math.min(p1.x, p2.x);
+    const maxX = Math.max(p1.x, p2.x);
+    const minY = Math.min(p1.y, p2.y);
+    const maxY = Math.max(p1.y, p2.y);
+
+    // Horizontal segment
+    if (p1.y === p2.y && row === p1.y && col >= minX && col <= maxX) {
+      return true;
+    }
+    // Vertical segment
+    if (p1.x === p2.x && col === p1.x && row >= minY && row <= maxY) {
+      return true;
+    }
+    return false;
+  }
+
+  // Get bounding box for any object (used for marquee selection)
+  getObjectBounds(obj) {
+    if (obj.type === 'line') {
+      return this.getLineBounds(obj);
+    }
+    // Default: box-like objects
+    return {
+      x: obj.x,
+      y: obj.y,
+      width: obj.width || 10,
+      height: obj.height || 3
+    };
+  }
+
+  // Get bounding box for line objects
+  getLineBounds(obj) {
+    if (!obj.points || obj.points.length === 0) {
+      return { x: 0, y: 0, width: 1, height: 1 };
+    }
+    const xs = obj.points.map(p => p.x);
+    const ys = obj.points.map(p => p.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1
+    };
   }
 
   // SEL-3: Visual distinction for marquee modes
@@ -564,9 +745,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     state.selection.ids.forEach(id => {
       const obj = page.objects.find(o => o.id === id);
       if (obj) {
-        const { x, y } = context.grid.charToPixel(obj.x, obj.y);
-        const width = (obj.width || 10) * context.grid.charWidth;
-        const height = (obj.height || 3) * context.grid.charHeight;
+        // Use getObjectBounds to handle both boxes and lines
+        const bounds = this.getObjectBounds(obj);
+        const { x, y } = context.grid.charToPixel(bounds.x, bounds.y);
+        const width = bounds.width * context.grid.charWidth;
+        const height = bounds.height * context.grid.charHeight;
 
         ctx.strokeStyle = selectionStroke;
         ctx.lineWidth = 1;
@@ -578,13 +761,33 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           const handleSize = 6;
           ctx.fillStyle = selectionStroke;
 
-          // Corner handles
-          ctx.fillRect(x - handleSize/2, y - handleSize/2, handleSize, handleSize);
-          ctx.fillRect(x + width - handleSize/2, y - handleSize/2, handleSize, handleSize);
-          ctx.fillRect(x - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
-          ctx.fillRect(x + width - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
+          if (obj.type === 'line') {
+            // For lines, draw handles at each point
+            this.drawLineHandles(ctx, obj, context, selectionStroke);
+          } else {
+            // Corner handles for boxes
+            ctx.fillRect(x - handleSize/2, y - handleSize/2, handleSize, handleSize);
+            ctx.fillRect(x + width - handleSize/2, y - handleSize/2, handleSize, handleSize);
+            ctx.fillRect(x - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
+            ctx.fillRect(x + width - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
+          }
         }
       }
+    });
+  }
+
+  // Draw handles at each point of a line
+  drawLineHandles(ctx, obj, context, color) {
+    if (!obj.points) return;
+
+    const handleSize = 6;
+    ctx.fillStyle = color;
+
+    obj.points.forEach(point => {
+      const pixel = context.grid.charToPixel(point.x, point.y);
+      const centerX = pixel.x + context.grid.charWidth / 2;
+      const centerY = pixel.y + context.grid.charHeight / 2;
+      ctx.fillRect(centerX - handleSize/2, centerY - handleSize/2, handleSize, handleSize);
     });
   }
 };

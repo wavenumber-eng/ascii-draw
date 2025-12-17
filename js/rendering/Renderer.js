@@ -216,12 +216,147 @@ AsciiEditor.rendering.Renderer = class Renderer {
       case 'box':
         this.drawBox(obj);
         break;
+      case 'line':
+        this.drawLine(obj);
+        break;
       case 'text':
         this.drawText(obj.text || '', obj.x, obj.y);
         break;
       default:
         // Placeholder for unimplemented types
         this.drawBox({ ...obj, width: obj.width || 10, height: obj.height || 3 });
+    }
+  }
+
+  // OBJ-30 to OBJ-37: Line/polyline rendering
+  drawLine(obj) {
+    const { points, style, startCap, endCap } = obj;
+    if (!points || points.length < 2) return;
+
+    const styles = getComputedStyle(document.documentElement);
+    const color = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
+
+    // Line style characters
+    const lineChars = {
+      single: { h: '─', v: '│', tl: '┌', tr: '┐', bl: '└', br: '┘' },
+      double: { h: '═', v: '║', tl: '╔', tr: '╗', bl: '╚', br: '╝' },
+      thick:  { h: '█', v: '█', tl: '█', tr: '█', bl: '█', br: '█' }
+    };
+    const chars = lineChars[style] || lineChars.single;
+
+    // Draw each segment
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+
+      this.drawSegment(p1, p2, chars, color);
+    }
+
+    // Draw corners at intermediate points (clear background first to avoid overlap artifacts)
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+
+      const cornerChar = this.getCornerChar(prev, curr, next, chars);
+      if (cornerChar) {
+        // Clear the cell first to remove overlapping segment characters
+        const cx = curr.x * this.grid.charWidth;
+        const cy = curr.y * this.grid.charHeight;
+        const bgStyles = getComputedStyle(document.documentElement);
+        const bgCanvas = bgStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+        this.ctx.fillStyle = bgCanvas;
+        this.ctx.fillRect(cx, cy, this.grid.charWidth, this.grid.charHeight);
+
+        this.drawChar(cornerChar, curr.x, curr.y, color);
+      }
+    }
+
+    // Draw endpoint caps
+    if (startCap && startCap !== 'none') {
+      this.drawEndCap(points[0], points[1], startCap, true, color);
+    }
+    if (endCap && endCap !== 'none') {
+      this.drawEndCap(points[points.length - 1], points[points.length - 2], endCap, false, color);
+    }
+  }
+
+  drawSegment(p1, p2, chars, color) {
+    const dx = Math.sign(p2.x - p1.x);
+    const dy = Math.sign(p2.y - p1.y);
+
+    if (dx !== 0 && dy === 0) {
+      // Horizontal segment
+      const startX = Math.min(p1.x, p2.x);
+      const endX = Math.max(p1.x, p2.x);
+      for (let x = startX; x <= endX; x++) {
+        this.drawChar(chars.h, x, p1.y, color);
+      }
+    } else if (dy !== 0 && dx === 0) {
+      // Vertical segment
+      const startY = Math.min(p1.y, p2.y);
+      const endY = Math.max(p1.y, p2.y);
+      for (let y = startY; y <= endY; y++) {
+        this.drawChar(chars.v, p1.x, y, color);
+      }
+    }
+    // Diagonal segments not supported for orthogonal lines
+  }
+
+  getCornerChar(prev, curr, next, chars) {
+    // Determine incoming and outgoing directions
+    const inDir = this.getDirection(prev, curr);
+    const outDir = this.getDirection(curr, next);
+
+    // Map direction pairs to corner characters
+    // Incoming from left/right/up/down, outgoing to left/right/up/down
+    const cornerMap = {
+      'right-down': chars.tr,  // ┐ coming from left, going down
+      'right-up': chars.br,    // ┘ coming from left, going up
+      'left-down': chars.tl,   // ┌ coming from right, going down
+      'left-up': chars.bl,     // └ coming from right, going up
+      'down-right': chars.bl,  // └ coming from above, going right
+      'down-left': chars.br,   // ┘ coming from above, going left
+      'up-right': chars.tl,    // ┌ coming from below, going right
+      'up-left': chars.tr      // ┐ coming from below, going left
+    };
+
+    return cornerMap[`${inDir}-${outDir}`] || null;
+  }
+
+  getDirection(from, to) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+
+    if (dx > 0) return 'right';
+    if (dx < 0) return 'left';
+    if (dy > 0) return 'down';
+    if (dy < 0) return 'up';
+    return 'none';
+  }
+
+  drawEndCap(point, adjacentPoint, capType, isStart, color) {
+    // Determine direction of the segment at this endpoint
+    const dir = isStart
+      ? this.getDirection(point, adjacentPoint)
+      : this.getDirection(adjacentPoint, point);
+
+    // Cap characters based on type and direction
+    const caps = {
+      arrow: { right: '>', left: '<', down: 'v', up: '^' },
+      triangle: { right: '▶', left: '◀', down: '▼', up: '▲' },
+      'triangle-outline': { right: '▷', left: '◁', down: '▽', up: '△' },
+      diamond: { right: '◆', left: '◆', down: '◆', up: '◆' },
+      'diamond-outline': { right: '◇', left: '◇', down: '◇', up: '◇' },
+      circle: { right: '●', left: '●', down: '●', up: '●' },
+      'circle-outline': { right: '○', left: '○', down: '○', up: '○' },
+      square: { right: '■', left: '■', down: '■', up: '■' },
+      'square-outline': { right: '□', left: '□', down: '□', up: '□' }
+    };
+
+    const capChars = caps[capType];
+    if (capChars && capChars[dir]) {
+      this.drawChar(capChars[dir], point.x, point.y, color);
     }
   }
 

@@ -96,20 +96,71 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 - [x] **OBJ-16**: Optional fill property for interior whitespace
 - [x] **OBJ-17**: Fill characters: none (default), ░ (light), ▒ (medium), ▓ (dark), █ (solid), · (dots)
 
-### Line Object
+### Line/Polyline Object
 
-- [ ] **OBJ-30**: Straight lines (horizontal, vertical, diagonal)
-- [ ] **OBJ-31**: Properties: start point, end point
-- [ ] **OBJ-32**: Line characters: ─ │ ╱ ╲
-- [ ] **OBJ-33**: Optional arrow heads: ◀ ▶ ▲ ▼ ← → ↑ ↓
-- [ ] **OBJ-34**: Arrow position: none, start, end, both
+A polyline is an ordered sequence of points connected by orthogonal (horizontal/vertical) segments.
 
-### Connector Object (Sticky Lines)
+- [ ] **OBJ-30**: Polyline with multiple segments (array of points)
+- [ ] **OBJ-31**: Properties: points[], style, startCap, endCap
+- [ ] **OBJ-32**: Orthogonal only: horizontal and vertical segments, 90-degree turns
+- [ ] **OBJ-33**: Line styles: single (─│), double (═║), thick (█)
+- [ ] **OBJ-34**: Corner characters auto-selected based on turn direction (┌┐└┘ etc.)
 
-- [ ] **OBJ-40**: Lines that attach to boxes at connection points
-- [ ] **OBJ-41**: Auto-reroute when connected box is moved
-- [ ] **OBJ-42**: Smart routing behavior (similar to draw.io)
-- [ ] **OBJ-43**: Connection points on box edges
+#### Endpoint Caps (Dropdown Selection)
+
+- [ ] **OBJ-35**: Endpoint styles selectable via dropdown for start and end
+- [ ] **OBJ-36**: Cap options: none, arrow (<>^v), triangle (◄►▲▼), diamond (◆), circle (●), square (■), bar (perpendicular line)
+- [ ] **OBJ-37**: Cap direction auto-determined from segment direction
+
+#### Line Drawing Interaction
+
+- [ ] **OBJ-38**: Click to add points, right-click or Enter to finish
+- [ ] **OBJ-39**: Escape cancels current line, Backspace removes last point
+- [ ] **OBJ-3A**: Preview line shown from last point to cursor while drawing
+
+#### Orthogonal Routing with Posture
+
+When drawing lines, the path from the current anchor point to the cursor is always orthogonal. The routing behavior depends on whether the cursor is axis-aligned or diagonal from the anchor.
+
+- [ ] **OBJ-3A1**: **Axis-aligned case**: If cursor is on same X or Y as anchor, show straight line
+- [ ] **OBJ-3A2**: **Diagonal case**: If both X and Y differ, insert TWO points to create orthogonal path
+- [ ] **OBJ-3A3**: **Posture** determines routing: horizontal-first (H-V) or vertical-first (V-H)
+- [ ] **OBJ-3A4**: Example: Anchor (0,0) to cursor (10,10) with H-first → (0,0)→(10,0)→(10,10)
+- [ ] **OBJ-3A5**: Example: Anchor (0,0) to cursor (10,10) with V-first → (0,0)→(0,10)→(10,10)
+- [ ] **OBJ-3A6**: **Space key** toggles posture while drawing, causing preview to update
+- [ ] **OBJ-3A7**: Preview updates in real-time as mouse moves
+- [ ] **OBJ-3A8**: On click, add the intermediate point(s); last point becomes new anchor
+
+### Line Selection & Manipulation
+
+- [ ] **OBJ-3B**: Each point becomes a draggable handle when selected
+- [ ] **OBJ-3C**: Dragging a point moves that vertex, connected segments adjust
+- [ ] **OBJ-3D**: Dragging a segment (not a point) moves both endpoints of that segment
+- [ ] **OBJ-3E**: For horizontal segment drag: both points move same Y delta
+- [ ] **OBJ-3F**: For vertical segment drag: both points move same X delta
+- [ ] **OBJ-3G**: Adjacent segments stretch to maintain connections
+
+### Connector/Sticky Endpoints (Future Extension)
+
+Lines can optionally attach ("stick") to boxes, moving when the box moves.
+
+- [ ] **OBJ-40**: Line endpoints can attach to box edges at connection points
+- [ ] **OBJ-41**: When attached box moves, line endpoint follows
+- [ ] **OBJ-42**: Connection snaps to nearest valid point on box edge
+- [ ] **OBJ-43**: Visual indicator when hovering near attachable point
+- [ ] **OBJ-44**: Detach by dragging endpoint away from box
+
+### Line/Wire Code Sharing Note
+
+Lines and Wires (OBJ-60) share core rendering and manipulation code. The key differences:
+- **Line**: Pure visual element, no connectivity semantics
+- **Wire**: Has net label property, participates in connectivity graph
+
+Implementation should use shared base class or utility functions for:
+- Point array management
+- Segment rendering (characters, corners)
+- Hit testing
+- Handle manipulation
 
 ### Symbol Object (Pin/Node Box)
 
