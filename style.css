@@ -38,6 +38,7 @@
   --selection-fill: rgba(0, 122, 204, 0.1);
   --marquee-enclosed-stroke: #007acc;
   --marquee-enclosed-fill: rgba(0, 122, 204, 0.1);
+  --segment-handle: #00cc7a;
   --marquee-intersect-stroke: #00cc7a;
   --marquee-intersect-fill: rgba(0, 204, 122, 0.1);
 

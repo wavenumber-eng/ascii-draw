@@ -12,7 +12,8 @@ const SelectMode = {
   DRAGGING: 'dragging',           // Moving selected object(s)
   MARQUEE: 'marquee',             // Drawing selection rectangle
   RESIZING: 'resizing',           // Resizing single object (boxes)
-  LINE_POINT: 'line_point'        // Dragging a line point
+  LINE_POINT: 'line_point',       // Dragging a line vertex
+  LINE_SEGMENT: 'line_segment'    // Dragging a line segment midpoint
 };
 
 // Resize handle positions
@@ -35,8 +36,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.dragStart = null;
     this.dragCurrent = null;
     // Line point dragging state
-    this.linePointIndex = null;     // Index of point being dragged
-    this.lineOriginalPoints = null; // Original points array for undo
+    this.linePointIndex = null;       // Index of point being dragged
+    this.lineOriginalPoints = null;   // Original points array for undo
+    // Line segment dragging state
+    this.lineSegmentIndex = null;     // Index of segment being dragged (segment between points i and i+1)
+    this.lineSegmentIsHorizontal = null; // True if segment is horizontal
     this.draggedIds = [];
     this.originalPositions = {};
     this.activeHandle = null;
@@ -64,6 +68,8 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.addToSelection = false;
     this.linePointIndex = null;
     this.lineOriginalPoints = null;
+    this.lineSegmentIndex = null;
+    this.lineSegmentIsHorizontal = null;
   }
 
   onMouseDown(event, context) {
@@ -78,9 +84,16 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       const handle = this.hitTestHandle(event.canvasX, event.canvasY, context);
       if (handle) {
         if (handle.type === 'line_point') {
-          // Start dragging a line point
+          // Start dragging a line vertex
           this.mode = SelectMode.LINE_POINT;
           this.linePointIndex = handle.pointIndex;
+          this.lineOriginalPoints = handle.obj.points.map(p => ({ ...p }));
+          return true;
+        } else if (handle.type === 'line_segment') {
+          // Start dragging a line segment
+          this.mode = SelectMode.LINE_SEGMENT;
+          this.lineSegmentIndex = handle.segmentIndex;
+          this.lineSegmentIsHorizontal = handle.isHorizontal;
           this.lineOriginalPoints = handle.obj.points.map(p => ({ ...p }));
           return true;
         } else if (handle.type === 'box_corner') {
@@ -195,6 +208,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       return true;
     }
 
+    if (this.mode === SelectMode.LINE_SEGMENT && this.lineSegmentIndex !== null) {
+      this.performLineSegmentDrag(col, row, context);
+      return true;
+    }
+
     if (this.mode === SelectMode.MARQUEE) {
       return true;  // Just redraw to show marquee
     }
@@ -206,6 +224,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       if (handle) {
         if (handle.type === 'line_point') {
           context.canvas.style.cursor = 'move';
+        } else if (handle.type === 'line_segment') {
+          // Show appropriate cursor based on segment direction
+          context.canvas.style.cursor = handle.isHorizontal ? 'ns-resize' : 'ew-resize';
         } else {
           context.canvas.style.cursor = this.getHandleCursor(handle.position);
         }
@@ -266,6 +287,10 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     if (this.mode === SelectMode.LINE_POINT && this.lineOriginalPoints) {
       this.finalizeLinePointDrag(context);
+    }
+
+    if (this.mode === SelectMode.LINE_SEGMENT && this.lineOriginalPoints) {
+      this.finalizeLineSegmentDrag(context);
     }
 
     if (this.mode === SelectMode.MARQUEE) {
@@ -425,6 +450,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   // OBJ-3C: Drag line point to move vertex
+  // When dragging a vertex, also adjust adjacent points to maintain orthogonality
   performLinePointDrag(col, row, context) {
     const state = context.history.getState();
     const page = state.project.pages.find(p => p.id === state.activePageId);
@@ -433,15 +459,47 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     const obj = page.objects.find(o => o.id === state.selection.ids[0]);
     if (!obj || obj.type !== 'line' || !obj.points) return;
 
-    // Update the point position directly in state
+    const idx = this.linePointIndex;
+    const origPoints = this.lineOriginalPoints;
+    const numPoints = origPoints.length;
+
     context.history.updateState(s => {
       const newState = AsciiEditor.core.deepClone(s);
       const pg = newState.project.pages.find(p => p.id === s.activePageId);
       if (pg) {
         const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
-        if (lineObj && lineObj.points && lineObj.points[this.linePointIndex]) {
-          lineObj.points[this.linePointIndex].x = col;
-          lineObj.points[this.linePointIndex].y = row;
+        if (lineObj && lineObj.points && lineObj.points[idx]) {
+          // Move the dragged vertex
+          lineObj.points[idx].x = col;
+          lineObj.points[idx].y = row;
+
+          // Adjust previous point to maintain orthogonality
+          if (idx > 0) {
+            const prevOrig = origPoints[idx - 1];
+            const currOrig = origPoints[idx];
+            // Was the segment horizontal or vertical?
+            if (prevOrig.y === currOrig.y) {
+              // Was horizontal - keep it horizontal by matching Y
+              lineObj.points[idx - 1].y = row;
+            } else if (prevOrig.x === currOrig.x) {
+              // Was vertical - keep it vertical by matching X
+              lineObj.points[idx - 1].x = col;
+            }
+          }
+
+          // Adjust next point to maintain orthogonality
+          if (idx < numPoints - 1) {
+            const currOrig = origPoints[idx];
+            const nextOrig = origPoints[idx + 1];
+            // Was the segment horizontal or vertical?
+            if (currOrig.y === nextOrig.y) {
+              // Was horizontal - keep it horizontal by matching Y
+              lineObj.points[idx + 1].y = row;
+            } else if (currOrig.x === nextOrig.x) {
+              // Was vertical - keep it vertical by matching X
+              lineObj.points[idx + 1].x = col;
+            }
+          }
         }
       }
       return newState;
@@ -457,13 +515,149 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (!obj || obj.type !== 'line' || !obj.points) return;
 
     const origPoints = this.lineOriginalPoints;
-    const newPoints = obj.points.map(p => ({ ...p }));
+    // Simplify points to remove duplicates and collinear points
+    const newPoints = this.simplifyLinePoints(obj.points.map(p => ({ ...p })));
 
     // Check if points changed
-    const hasChanged = origPoints.some((orig, i) => {
-      const curr = newPoints[i];
-      return orig.x !== curr.x || orig.y !== curr.y;
-    });
+    const hasChanged = origPoints.length !== newPoints.length ||
+      origPoints.some((orig, i) => {
+        const curr = newPoints[i];
+        return !curr || orig.x !== curr.x || orig.y !== curr.y;
+      });
+
+    if (hasChanged) {
+      // Restore original
+      context.history.updateState(s => {
+        const newState = AsciiEditor.core.deepClone(s);
+        const pg = newState.project.pages.find(p => p.id === s.activePageId);
+        if (pg) {
+          const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
+          if (lineObj) {
+            lineObj.points = origPoints.map(p => ({ ...p }));
+          }
+        }
+        return newState;
+      });
+
+      // Execute command for undo/redo
+      context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+        state.activePageId,
+        obj.id,
+        { points: origPoints },
+        { points: newPoints }
+      ));
+    }
+  }
+
+  /**
+   * Simplify line points by removing:
+   * 1. Duplicate consecutive points (same x,y)
+   * 2. Collinear points (redundant middle points on same axis)
+   */
+  simplifyLinePoints(points) {
+    if (points.length < 2) return points;
+
+    // First pass: remove duplicate consecutive points
+    let filtered = [points[0]];
+    for (let i = 1; i < points.length; i++) {
+      const prev = filtered[filtered.length - 1];
+      const curr = points[i];
+      if (prev.x !== curr.x || prev.y !== curr.y) {
+        filtered.push(curr);
+      }
+    }
+
+    if (filtered.length < 3) return filtered;
+
+    // Second pass: remove collinear points
+    const result = [filtered[0]];
+    for (let i = 1; i < filtered.length - 1; i++) {
+      const prev = result[result.length - 1];
+      const curr = filtered[i];
+      const next = filtered[i + 1];
+
+      const sameX = (prev.x === curr.x && curr.x === next.x);
+      const sameY = (prev.y === curr.y && curr.y === next.y);
+
+      if (!sameX && !sameY) {
+        result.push(curr);
+      }
+    }
+    result.push(filtered[filtered.length - 1]);
+
+    return result;
+  }
+
+  // OBJ-3D to OBJ-3G: Drag line segment (move both endpoints perpendicular to segment)
+  performLineSegmentDrag(col, row, context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+    if (!obj || obj.type !== 'line' || !obj.points) return;
+
+    const segIdx = this.lineSegmentIndex;
+    const origPoints = this.lineOriginalPoints;
+
+    // Calculate delta from original segment position
+    if (this.lineSegmentIsHorizontal) {
+      // Horizontal segment: only allow vertical movement (change Y)
+      const origY = origPoints[segIdx].y;
+      const deltaY = row - origY;
+
+      context.history.updateState(s => {
+        const newState = AsciiEditor.core.deepClone(s);
+        const pg = newState.project.pages.find(p => p.id === s.activePageId);
+        if (pg) {
+          const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
+          if (lineObj && lineObj.points) {
+            // Move both endpoints of this segment by deltaY
+            lineObj.points[segIdx].y = origPoints[segIdx].y + deltaY;
+            lineObj.points[segIdx + 1].y = origPoints[segIdx + 1].y + deltaY;
+          }
+        }
+        return newState;
+      });
+    } else {
+      // Vertical segment: only allow horizontal movement (change X)
+      const origX = origPoints[segIdx].x;
+      const deltaX = col - origX;
+
+      context.history.updateState(s => {
+        const newState = AsciiEditor.core.deepClone(s);
+        const pg = newState.project.pages.find(p => p.id === s.activePageId);
+        if (pg) {
+          const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
+          if (lineObj && lineObj.points) {
+            // Move both endpoints of this segment by deltaX
+            lineObj.points[segIdx].x = origPoints[segIdx].x + deltaX;
+            lineObj.points[segIdx + 1].x = origPoints[segIdx + 1].x + deltaX;
+          }
+        }
+        return newState;
+      });
+    }
+  }
+
+  finalizeLineSegmentDrag(context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+    if (!obj || obj.type !== 'line' || !obj.points) return;
+
+    const origPoints = this.lineOriginalPoints;
+    // Simplify points to remove duplicates and collinear points
+    const newPoints = this.simplifyLinePoints(obj.points.map(p => ({ ...p })));
+
+    // Check if points changed
+    const hasChanged = origPoints.length !== newPoints.length ||
+      origPoints.some((orig, i) => {
+        const curr = newPoints[i];
+        return !curr || orig.x !== curr.x || orig.y !== curr.y;
+      });
 
     if (hasChanged) {
       // Restore original
@@ -570,8 +764,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     const handleSize = 8;
 
-    // Line point handles
+    // Line handles (vertex and segment)
     if (obj.type === 'line' && obj.points) {
+      // First check vertex handles (higher priority)
       for (let i = 0; i < obj.points.length; i++) {
         const point = obj.points[i];
         const pixel = context.grid.charToPixel(point.x, point.y);
@@ -582,6 +777,28 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           return { type: 'line_point', pointIndex: i, obj };
         }
       }
+
+      // Then check segment handles (midpoints)
+      for (let i = 0; i < obj.points.length - 1; i++) {
+        const p1 = obj.points[i];
+        const p2 = obj.points[i + 1];
+
+        // Calculate midpoint in character coordinates
+        const midX = (p1.x + p2.x) / 2;
+        const midY = (p1.y + p2.y) / 2;
+
+        // Convert to pixel coordinates
+        const midPixelX = midX * context.grid.charWidth + context.grid.charWidth / 2;
+        const midPixelY = midY * context.grid.charHeight + context.grid.charHeight / 2;
+
+        // Determine if segment is horizontal or vertical
+        const isHorizontal = (p1.y === p2.y);
+
+        if (Math.abs(pixelX - midPixelX) <= handleSize && Math.abs(pixelY - midPixelY) <= handleSize) {
+          return { type: 'line_segment', segmentIndex: i, isHorizontal, obj };
+        }
+      }
+
       return null;
     }
 
@@ -781,8 +998,36 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (!obj.points) return;
 
     const handleSize = 6;
-    ctx.fillStyle = color;
+    const segmentHandleSize = 5;
 
+    // Get segment handle color (different from vertex handles)
+    const styles = getComputedStyle(document.documentElement);
+    const segmentColor = styles.getPropertyValue('--segment-handle').trim() || '#00cc7a';
+
+    // Draw segment handles (midpoints) first, so vertex handles appear on top
+    ctx.fillStyle = segmentColor;
+    for (let i = 0; i < obj.points.length - 1; i++) {
+      const p1 = obj.points[i];
+      const p2 = obj.points[i + 1];
+
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+
+      const midPixelX = midX * context.grid.charWidth + context.grid.charWidth / 2;
+      const midPixelY = midY * context.grid.charHeight + context.grid.charHeight / 2;
+
+      // Draw diamond shape for segment handles
+      ctx.beginPath();
+      ctx.moveTo(midPixelX, midPixelY - segmentHandleSize);
+      ctx.lineTo(midPixelX + segmentHandleSize, midPixelY);
+      ctx.lineTo(midPixelX, midPixelY + segmentHandleSize);
+      ctx.lineTo(midPixelX - segmentHandleSize, midPixelY);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Draw vertex handles (squares)
+    ctx.fillStyle = color;
     obj.points.forEach(point => {
       const pixel = context.grid.charToPixel(point.x, point.y);
       const centerX = pixel.x + context.grid.charWidth / 2;

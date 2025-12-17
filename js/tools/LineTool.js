@@ -237,11 +237,20 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
 
     const state = context.history.getState();
 
-    // Create line object with committed points and current style
+    // Simplify points by removing redundant collinear points
+    const simplifiedPoints = this.simplifyPoints(this.points);
+
+    // Need at least 2 points after simplification
+    if (simplifiedPoints.length < 2) {
+      this.cancelLine();
+      return;
+    }
+
+    // Create line object with simplified points and current style
     const newLine = {
       id: AsciiEditor.core.generateId(),
       type: 'line',
-      points: this.points.map(p => ({ x: p.x, y: p.y })),
+      points: simplifiedPoints.map(p => ({ x: p.x, y: p.y })),
       style: this.style,
       startCap: 'none',
       endCap: 'none'
@@ -274,6 +283,37 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
     this.points = [];
     this.currentPos = null;
     this.hFirst = true;
+  }
+
+  /**
+   * Simplify points by removing redundant collinear points.
+   * Three consecutive points on the same axis (same X or same Y)
+   * means the middle point is redundant and can be removed.
+   */
+  simplifyPoints(points) {
+    if (points.length < 3) return points;
+
+    const result = [points[0]];
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = result[result.length - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+
+      // Check if curr is collinear between prev and next
+      const sameX = (prev.x === curr.x && curr.x === next.x);
+      const sameY = (prev.y === curr.y && curr.y === next.y);
+
+      // Keep the point only if it's NOT collinear (i.e., it's a real corner)
+      if (!sameX && !sameY) {
+        result.push(curr);
+      }
+    }
+
+    // Always add the last point
+    result.push(points[points.length - 1]);
+
+    return result;
   }
 
   /**

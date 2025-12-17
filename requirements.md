@@ -133,12 +133,18 @@ When drawing lines, the path from the current anchor point to the cursor is alwa
 
 ### Line Selection & Manipulation
 
-- [ ] **OBJ-3B**: Each point becomes a draggable handle when selected
-- [ ] **OBJ-3C**: Dragging a point moves that vertex, connected segments adjust
-- [ ] **OBJ-3D**: Dragging a segment (not a point) moves both endpoints of that segment
-- [ ] **OBJ-3E**: For horizontal segment drag: both points move same Y delta
-- [ ] **OBJ-3F**: For vertical segment drag: both points move same X delta
-- [ ] **OBJ-3G**: Adjacent segments stretch to maintain connections
+Two types of handles appear when a line is selected:
+
+#### Vertex Handles (at each point)
+- [ ] **OBJ-3B**: Each vertex shows a draggable handle (accent color)
+- [ ] **OBJ-3C**: Dragging an **endpoint** (first or last) moves freely, maintains orthogonality via posture
+- [ ] **OBJ-3C2**: Dragging an **intermediate vertex** inserts new points to create L-shapes on both sides, maintaining orthogonal connections
+
+#### Segment Handles (midpoints between vertices)
+- [ ] **OBJ-3D**: Each segment shows a draggable handle at its midpoint (different color)
+- [ ] **OBJ-3E**: Horizontal segment handle: constrained to vertical movement (up/down only)
+- [ ] **OBJ-3F**: Vertical segment handle: constrained to horizontal movement (left/right only)
+- [ ] **OBJ-3G**: Dragging segment handle moves both endpoints of that segment by the same delta
 
 ### Connector/Sticky Endpoints (Future Extension)
 
