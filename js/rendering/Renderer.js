@@ -233,16 +233,17 @@ AsciiEditor.rendering.Renderer = class Renderer {
     const { points, style, startCap, endCap } = obj;
     if (!points || points.length < 2) return;
 
-    const styles = getComputedStyle(document.documentElement);
-    const color = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
+    const cssStyles = getComputedStyle(document.documentElement);
+    const color = cssStyles.getPropertyValue('--text-canvas').trim() || '#cccccc';
 
-    // Line style characters
-    const lineChars = {
-      single: { h: '─', v: '│', tl: '┌', tr: '┐', bl: '└', br: '┘' },
-      double: { h: '═', v: '║', tl: '╔', tr: '╗', bl: '╚', br: '╝' },
-      thick:  { h: '█', v: '█', tl: '█', tr: '█', bl: '█', br: '█' }
-    };
-    const chars = lineChars[style] || lineChars.single;
+    // Use shared LineStyles definition if available, fallback to default
+    let chars = { h: '─', v: '│', tl: '┌', tr: '┐', bl: '└', br: '┘' };
+    if (AsciiEditor.tools && AsciiEditor.tools.LineStyles) {
+      const styleDef = AsciiEditor.tools.LineStyles.find(s => s.key === style);
+      if (styleDef) {
+        chars = styleDef.chars;
+      }
+    }
 
     // Draw each segment
     for (let i = 0; i < points.length - 1; i++) {

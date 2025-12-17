@@ -6,6 +6,35 @@
 var AsciiEditor = AsciiEditor || {};
 AsciiEditor.tools = AsciiEditor.tools || {};
 
+// Line style definitions - single source of truth for all style metadata
+// To add a new style: add entry here with key, label, chars, and assign a hotkey
+AsciiEditor.tools.LineStyles = [
+  {
+    key: 'single',
+    label: 'Single',
+    hotkey: '1',
+    chars: { h: '─', v: '│', tl: '┌', tr: '┐', bl: '└', br: '┘' }
+  },
+  {
+    key: 'double',
+    label: 'Double',
+    hotkey: '2',
+    chars: { h: '═', v: '║', tl: '╔', tr: '╗', bl: '╚', br: '╝' }
+  },
+  {
+    key: 'thick',
+    label: 'Thick',
+    hotkey: '3',
+    chars: { h: '█', v: '█', tl: '█', tr: '█', bl: '█', br: '█' }
+  },
+  {
+    key: 'dashed',
+    label: 'Dashed',
+    hotkey: '4',
+    chars: { h: '┄', v: '┆', tl: '┌', tr: '┐', bl: '└', br: '┘' }
+  }
+];
+
 AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
   constructor() {
     super('line');
@@ -14,6 +43,34 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
     this.points = [];           // Array of {x, y} committed points
     this.currentPos = null;     // Live cursor position for preview
     this.hFirst = true;         // OBJ-3A3: Posture - true = horizontal-first, false = vertical-first
+    this.styleIndex = 0;        // Index into LineStyles array
+
+    // Build lookup maps from LineStyles
+    this.styles = AsciiEditor.tools.LineStyles;
+    this.styleByKey = {};
+    this.styleByHotkey = {};
+    for (const style of this.styles) {
+      this.styleByKey[style.key] = style;
+      this.styleByHotkey[style.hotkey] = style;
+    }
+  }
+
+  // Get current style object
+  get currentStyle() {
+    return this.styles[this.styleIndex];
+  }
+
+  // Get current style key (for saving to line object)
+  get style() {
+    return this.currentStyle.key;
+  }
+
+  // Set style by key
+  set style(key) {
+    const index = this.styles.findIndex(s => s.key === key);
+    if (index >= 0) {
+      this.styleIndex = index;
+    }
   }
 
   activate(context) {
@@ -21,6 +78,7 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
     this.points = [];
     this.currentPos = null;
     this.hFirst = true;
+    // Keep style persistent across activations
     context.canvas.style.cursor = this.cursor;
   }
 
@@ -55,6 +113,15 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
       const intermediate = { x: anchor.x, y: cursor.y };
       return [anchor, intermediate, cursor];
     }
+  }
+
+  /**
+   * Cycle through line styles: single -> double -> thick -> single
+   */
+  cycleStyle() {
+    const styles = ['single', 'double', 'thick'];
+    const currentIndex = styles.indexOf(this.style);
+    this.style = styles[(currentIndex + 1) % styles.length];
   }
 
   onMouseDown(event, context) {
@@ -113,6 +180,19 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
   }
 
   onKeyDown(event, context) {
+    // Tab key cycles through styles
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      this.styleIndex = (this.styleIndex + 1) % this.styles.length;
+      return true;
+    }
+
+    // Number keys for direct style selection
+    if (this.styleByHotkey[event.key]) {
+      this.style = this.styleByHotkey[event.key].key;
+      return true;
+    }
+
     // OBJ-3A6: Space key toggles posture
     if (event.key === ' ' || event.code === 'Space') {
       if (this.drawing) {
@@ -157,12 +237,12 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
 
     const state = context.history.getState();
 
-    // Create line object with committed points
+    // Create line object with committed points and current style
     const newLine = {
       id: AsciiEditor.core.generateId(),
       type: 'line',
       points: this.points.map(p => ({ x: p.x, y: p.y })),
-      style: 'single',
+      style: this.style,
       startCap: 'none',
       endCap: 'none'
     };
@@ -177,7 +257,7 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
       selection: { ids: [newLine.id], handles: null }
     }));
 
-    // Reset tool state
+    // Reset tool state (but keep style)
     this.drawing = false;
     this.points = [];
     this.currentPos = null;
@@ -196,70 +276,151 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
     this.hFirst = true;
   }
 
+  /**
+   * Get direction from one point to another
+   */
+  getDirection(from, to) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    if (dx > 0) return 'right';
+    if (dx < 0) return 'left';
+    if (dy > 0) return 'down';
+    if (dy < 0) return 'up';
+    return 'none';
+  }
+
+  /**
+   * Get corner character based on incoming and outgoing directions
+   */
+  getCornerChar(prev, curr, next, chars) {
+    const inDir = this.getDirection(prev, curr);
+    const outDir = this.getDirection(curr, next);
+
+    const cornerMap = {
+      'right-down': chars.tr,
+      'right-up': chars.br,
+      'left-down': chars.tl,
+      'left-up': chars.bl,
+      'down-right': chars.bl,
+      'down-left': chars.br,
+      'up-right': chars.tl,
+      'up-left': chars.tr
+    };
+
+    return cornerMap[`${inDir}-${outDir}`] || null;
+  }
+
+  /**
+   * Draw a character at grid position using canvas context
+   */
+  drawChar(ctx, char, col, row, grid, color) {
+    const x = col * grid.charWidth;
+    const y = row * grid.charHeight;
+    ctx.fillStyle = color;
+    ctx.fillText(char, x, y + 2);
+  }
+
+  /**
+   * Draw line segments using ASCII characters
+   */
+  drawLineSegments(ctx, points, chars, grid, color) {
+    if (points.length < 2) return;
+
+    // Draw each segment
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const dx = Math.sign(p2.x - p1.x);
+      const dy = Math.sign(p2.y - p1.y);
+
+      if (dx !== 0 && dy === 0) {
+        // Horizontal segment
+        const startX = Math.min(p1.x, p2.x);
+        const endX = Math.max(p1.x, p2.x);
+        for (let x = startX; x <= endX; x++) {
+          this.drawChar(ctx, chars.h, x, p1.y, grid, color);
+        }
+      } else if (dy !== 0 && dx === 0) {
+        // Vertical segment
+        const startY = Math.min(p1.y, p2.y);
+        const endY = Math.max(p1.y, p2.y);
+        for (let y = startY; y <= endY; y++) {
+          this.drawChar(ctx, chars.v, p1.x, y, grid, color);
+        }
+      }
+    }
+
+    // Draw corners at intermediate points (clear cell first to avoid overlap)
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+      const cornerChar = this.getCornerChar(prev, curr, next, chars);
+      if (cornerChar) {
+        // Clear the cell first
+        const cx = curr.x * grid.charWidth;
+        const cy = curr.y * grid.charHeight;
+        const bgStyles = getComputedStyle(document.documentElement);
+        const bgCanvas = bgStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+        ctx.fillStyle = bgCanvas;
+        ctx.fillRect(cx, cy, grid.charWidth, grid.charHeight);
+
+        this.drawChar(ctx, cornerChar, curr.x, curr.y, grid, color);
+      }
+    }
+  }
+
   renderOverlay(ctx, context) {
     if (this.points.length === 0 && !this.currentPos) return;
 
     const styles = getComputedStyle(document.documentElement);
     const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
+    const textColor = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
 
-    ctx.strokeStyle = accent;
-    ctx.fillStyle = accent;
-    ctx.lineWidth = 1;
+    // Set up font for ASCII character rendering
+    ctx.font = '16px BerkeleyMono, monospace';
+    ctx.textBaseline = 'top';
 
-    const offsetX = context.grid.charWidth / 2;
-    const offsetY = context.grid.charHeight / 2;
+    const chars = this.currentStyle.chars;
+    const grid = context.grid;
 
-    // Draw committed segments
-    if (this.points.length > 1) {
-      ctx.setLineDash([]);
-      ctx.beginPath();
-
-      const firstPixel = context.grid.charToPixel(this.points[0].x, this.points[0].y);
-      ctx.moveTo(firstPixel.x + offsetX, firstPixel.y + offsetY);
-
-      for (let i = 1; i < this.points.length; i++) {
-        const pixel = context.grid.charToPixel(this.points[i].x, this.points[i].y);
-        ctx.lineTo(pixel.x + offsetX, pixel.y + offsetY);
-      }
-      ctx.stroke();
-    }
-
-    // Draw preview path from last anchor to cursor (dashed)
+    // Build complete preview path: committed points + preview to cursor
+    let allPoints = [...this.points];
     if (this.drawing && this.currentPos && this.points.length > 0) {
       const anchor = this.points[this.points.length - 1];
       const previewPath = this.getPreviewPath(anchor, this.currentPos);
-
-      if (previewPath.length > 1) {
-        ctx.setLineDash([5, 3]);
-        ctx.beginPath();
-
-        const startPixel = context.grid.charToPixel(previewPath[0].x, previewPath[0].y);
-        ctx.moveTo(startPixel.x + offsetX, startPixel.y + offsetY);
-
-        for (let i = 1; i < previewPath.length; i++) {
-          const pixel = context.grid.charToPixel(previewPath[i].x, previewPath[i].y);
-          ctx.lineTo(pixel.x + offsetX, pixel.y + offsetY);
-        }
-        ctx.stroke();
-        ctx.setLineDash([]);
+      // Add preview points (skip first since it's the anchor)
+      for (let i = 1; i < previewPath.length; i++) {
+        allPoints.push(previewPath[i]);
       }
     }
 
-    // Draw point markers for committed points
+    // Draw ASCII characters for the entire path
+    if (allPoints.length >= 2) {
+      this.drawLineSegments(ctx, allPoints, chars, grid, textColor);
+    }
+
+    // Draw point markers for committed points (small circles)
+    ctx.fillStyle = accent;
+    const offsetX = grid.charWidth / 2;
+    const offsetY = grid.charHeight / 2;
+
     for (let i = 0; i < this.points.length; i++) {
-      const pixel = context.grid.charToPixel(this.points[i].x, this.points[i].y);
+      const pixel = grid.charToPixel(this.points[i].x, this.points[i].y);
       ctx.beginPath();
-      ctx.arc(pixel.x + offsetX, pixel.y + offsetY, 4, 0, Math.PI * 2);
+      ctx.arc(pixel.x + offsetX, pixel.y + offsetY, 3, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Point count and posture indicator
+    // Status indicator: point count, posture, and style
     if (this.points.length > 0) {
       ctx.font = '11px sans-serif';
+      ctx.fillStyle = accent;
       const lastPoint = this.points[this.points.length - 1];
-      const labelPixel = context.grid.charToPixel(lastPoint.x, lastPoint.y);
+      const labelPixel = grid.charToPixel(lastPoint.x, lastPoint.y);
       const postureLabel = this.hFirst ? 'H-V' : 'V-H';
-      ctx.fillText(`${this.points.length} pts (${postureLabel})`, labelPixel.x + offsetX + 8, labelPixel.y + offsetY - 8);
+      const styleInfo = `${this.currentStyle.hotkey}:${this.currentStyle.label}`;
+      ctx.fillText(`${this.points.length}pts ${postureLabel} [${styleInfo}]`, labelPixel.x + offsetX + 8, labelPixel.y + offsetY - 8);
     }
   }
 };

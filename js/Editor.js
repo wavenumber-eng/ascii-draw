@@ -817,6 +817,12 @@ AsciiEditor.Editor = class Editor {
     const endCap = obj.endCap || 'none';
     const pointCount = obj.points ? obj.points.length : 0;
 
+    // Build style options from LineStyles definition
+    const lineStyles = AsciiEditor.tools.LineStyles || [];
+    const styleOptions = lineStyles.map(s =>
+      `<option value="${s.key}" ${style === s.key ? 'selected' : ''}>${s.chars.h} ${s.label} (${s.hotkey})</option>`
+    ).join('');
+
     content.innerHTML = `
       <div class="property-group">
         <div class="property-group-title">Line Info</div>
@@ -831,9 +837,7 @@ AsciiEditor.Editor = class Editor {
         <div class="property-row">
           <span class="property-label">Line Style</span>
           <select class="property-select" id="prop-style">
-            <option value="single" ${style === 'single' ? 'selected' : ''}>─ Single</option>
-            <option value="double" ${style === 'double' ? 'selected' : ''}>═ Double</option>
-            <option value="thick" ${style === 'thick' ? 'selected' : ''}>█ Thick</option>
+            ${styleOptions}
           </select>
         </div>
       </div>
@@ -1484,12 +1488,14 @@ AsciiEditor.Editor = class Editor {
     const { points, style, startCap, endCap } = obj;
     if (!points || points.length < 2) return;
 
-    const lineChars = {
-      single: { h: '─', v: '│', tl: '┌', tr: '┐', bl: '└', br: '┘' },
-      double: { h: '═', v: '║', tl: '╔', tr: '╗', bl: '╚', br: '╝' },
-      thick:  { h: '█', v: '█', tl: '█', tr: '█', bl: '█', br: '█' }
-    };
-    const chars = lineChars[style] || lineChars.single;
+    // Use shared LineStyles definition
+    let chars = { h: '─', v: '│', tl: '┌', tr: '┐', bl: '└', br: '┘' };
+    if (AsciiEditor.tools && AsciiEditor.tools.LineStyles) {
+      const styleDef = AsciiEditor.tools.LineStyles.find(s => s.key === style);
+      if (styleDef) {
+        chars = styleDef.chars;
+      }
+    }
 
     const setChar = (col, row, char) => {
       if (row >= 0 && row < buffer.length && col >= 0 && col < buffer[0].length) {
