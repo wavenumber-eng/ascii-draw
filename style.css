@@ -15,32 +15,32 @@
 }
 
 :root {
-  /* Background colors */
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #252526;
-  --bg-tertiary: #2d2d30;
-  --bg-canvas: #1a1a1a;
-  --bg-grid: #2a2a2a;
+  /* Background colors - Light theme */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #e8e8e8;
+  --bg-canvas: #ffffff;
+  --bg-grid: #e0e0e0;
 
-  /* Text colors */
-  --text-primary: #cccccc;
-  --text-secondary: #858585;
-  --text-canvas: #cccccc;
-  --text-shadow: #555555;
+  /* Text colors - Light theme */
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-canvas: #000000;
+  --text-shadow: #999999;
 
   /* Accent colors */
   --accent: #007acc;
-  --accent-secondary: #00cc7a;
-  --border: #3c3c3c;
+  --accent-secondary: #00aa66;
+  --border: #cccccc;
 
   /* Selection colors */
   --selection-stroke: #007acc;
-  --selection-fill: rgba(0, 122, 204, 0.1);
+  --selection-fill: rgba(0, 122, 204, 0.15);
   --marquee-enclosed-stroke: #007acc;
   --marquee-enclosed-fill: rgba(0, 122, 204, 0.1);
-  --segment-handle: #00cc7a;
-  --marquee-intersect-stroke: #00cc7a;
-  --marquee-intersect-fill: rgba(0, 204, 122, 0.1);
+  --segment-handle: #00aa66;
+  --marquee-intersect-stroke: #00aa66;
+  --marquee-intersect-fill: rgba(0, 170, 102, 0.1);
 
   /* Layout */
   --toolbar-height: 40px;

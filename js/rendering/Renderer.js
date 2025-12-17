@@ -170,11 +170,13 @@ AsciiEditor.rendering.Renderer = class Renderer {
 
     // OBJ-15: Draw multi-line text inside with 9-position justification
     if (obj.text) {
-      const innerWidth = width - 2;
-      const innerHeight = height - 2;
+      // For borderless boxes (style: 'none'), use full dimensions
+      const borderOffset = hasBorder ? 1 : 0;
+      const innerWidth = hasBorder ? width - 2 : width;
+      const innerHeight = hasBorder ? height - 2 : height;
       const lines = obj.text.split('\n');
 
-      const maxLines = innerHeight;
+      const maxLines = Math.max(innerHeight, 1);
       const displayLines = lines.slice(0, maxLines);
 
       const justify = obj.textJustify || 'center-center';
@@ -183,11 +185,11 @@ AsciiEditor.rendering.Renderer = class Renderer {
       // Calculate starting Y based on vertical alignment
       let startY;
       if (vAlign === 'top') {
-        startY = y + 1;
+        startY = y + borderOffset;
       } else if (vAlign === 'bottom') {
-        startY = y + height - 1 - displayLines.length;
+        startY = y + height - borderOffset - displayLines.length;
       } else {
-        startY = y + 1 + Math.floor((innerHeight - displayLines.length) / 2);
+        startY = y + borderOffset + Math.floor((innerHeight - displayLines.length) / 2);
       }
 
       // Clear background for text if there's a fill
@@ -199,11 +201,11 @@ AsciiEditor.rendering.Renderer = class Renderer {
         let textX;
 
         if (hAlign === 'left') {
-          textX = x + 1;
+          textX = x + borderOffset;
         } else if (hAlign === 'right') {
-          textX = x + width - 1 - displayLine.length;
+          textX = x + width - borderOffset - displayLine.length;
         } else {
-          textX = x + 1 + Math.floor((innerWidth - displayLine.length) / 2);
+          textX = x + borderOffset + Math.floor((innerWidth - displayLine.length) / 2);
         }
 
         this.drawText(displayLine, textX, startY + i, color, hasFill);
@@ -357,6 +359,14 @@ AsciiEditor.rendering.Renderer = class Renderer {
 
     const capChars = caps[capType];
     if (capChars && capChars[dir]) {
+      // Clear the cell first to remove overlapping segment characters
+      const px = point.x * this.grid.charWidth;
+      const py = point.y * this.grid.charHeight;
+      const bgStyles = getComputedStyle(document.documentElement);
+      const bgCanvas = bgStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+      this.ctx.fillStyle = bgCanvas;
+      this.ctx.fillRect(px, py, this.grid.charWidth, this.grid.charHeight);
+
       this.drawChar(capChars[dir], point.x, point.y, color);
     }
   }
@@ -394,21 +404,24 @@ AsciiEditor.rendering.Renderer = class Renderer {
   drawEditCursor(obj, cursorPos) {
     if (!obj || obj.type !== 'box') return;
 
-    const innerWidth = obj.width - 2;
-    const innerHeight = obj.height - 2;
+    // For borderless boxes (style: 'none'), use full dimensions
+    const hasBorder = obj.style && obj.style !== 'none';
+    const borderOffset = hasBorder ? 1 : 0;
+    const innerWidth = hasBorder ? obj.width - 2 : obj.width;
+    const innerHeight = hasBorder ? obj.height - 2 : obj.height;
     const lines = (obj.text || '').split('\n');
-    const displayLines = lines.slice(0, innerHeight);
+    const displayLines = lines.slice(0, Math.max(innerHeight, 1));
 
     const justify = obj.textJustify || 'center-center';
     const [vAlign, hAlign] = justify.split('-');
 
     let startY;
     if (vAlign === 'top') {
-      startY = obj.y + 1;
+      startY = obj.y + borderOffset;
     } else if (vAlign === 'bottom') {
-      startY = obj.y + obj.height - 1 - displayLines.length;
+      startY = obj.y + obj.height - borderOffset - displayLines.length;
     } else {
-      startY = obj.y + 1 + Math.floor((innerHeight - displayLines.length) / 2);
+      startY = obj.y + borderOffset + Math.floor((innerHeight - displayLines.length) / 2);
     }
 
     const lineIndex = Math.min(cursorPos.line, displayLines.length);
@@ -417,11 +430,11 @@ AsciiEditor.rendering.Renderer = class Renderer {
 
     let lineStartX;
     if (hAlign === 'left') {
-      lineStartX = obj.x + 1;
+      lineStartX = obj.x + borderOffset;
     } else if (hAlign === 'right') {
-      lineStartX = obj.x + obj.width - 1 - lineText.length;
+      lineStartX = obj.x + obj.width - borderOffset - lineText.length;
     } else {
-      lineStartX = obj.x + 1 + Math.floor((innerWidth - lineText.length) / 2);
+      lineStartX = obj.x + borderOffset + Math.floor((innerWidth - lineText.length) / 2);
     }
 
     const cursorX = lineStartX + cursorCol;

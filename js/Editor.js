@@ -114,6 +114,7 @@ AsciiEditor.Editor = class Editor {
     this.toolManager.register(new AsciiEditor.tools.SelectTool());
     this.toolManager.register(new AsciiEditor.tools.BoxTool());
     this.toolManager.register(new AsciiEditor.tools.LineTool());
+    this.toolManager.register(new AsciiEditor.tools.TextTool());
 
     // Set context
     this.toolManager.setContext({
@@ -681,6 +682,9 @@ AsciiEditor.Editor = class Editor {
   renderBoxProperties(obj) {
     const content = document.getElementById('properties-content');
     const justify = obj.textJustify || 'center-center';
+    // For borderless boxes (style: 'none'), minimum size is 1; for bordered boxes, minimum is 3
+    const hasBorder = obj.style && obj.style !== 'none';
+    const minSize = hasBorder ? 3 : 1;
 
     content.innerHTML = `
       <div class="property-group">
@@ -699,11 +703,11 @@ AsciiEditor.Editor = class Editor {
         <div class="property-group-title">Size</div>
         <div class="property-row">
           <span class="property-label">Width</span>
-          <input type="number" class="property-input" id="prop-width" value="${obj.width}" min="3">
+          <input type="number" class="property-input" id="prop-width" value="${obj.width}" min="${minSize}" data-has-border="${hasBorder}">
         </div>
         <div class="property-row">
           <span class="property-label">Height</span>
-          <input type="number" class="property-input" id="prop-height" value="${obj.height}" min="3">
+          <input type="number" class="property-input" id="prop-height" value="${obj.height}" min="${minSize}" data-has-border="${hasBorder}">
         </div>
       </div>
 
@@ -766,7 +770,10 @@ AsciiEditor.Editor = class Editor {
         input.addEventListener('change', () => {
           let value = parseInt(input.value, 10);
           if (prop === 'width' || prop === 'height') {
-            value = Math.max(3, value);
+            // Use minimum from data attribute (1 for borderless, 3 for bordered)
+            const hasBorder = input.dataset.hasBorder === 'true';
+            const minSize = hasBorder ? 3 : 1;
+            value = Math.max(minSize, value);
           }
           this.updateObjectProperty(obj.id, prop, value);
         });
@@ -1447,10 +1454,12 @@ AsciiEditor.Editor = class Editor {
     }
 
     if (text) {
-      const innerWidth = width - 2;
-      const innerHeight = height - 2;
+      // For borderless boxes (style: 'none'), use full dimensions
+      const borderOffset = hasBorder ? 1 : 0;
+      const innerWidth = hasBorder ? width - 2 : width;
+      const innerHeight = hasBorder ? height - 2 : height;
       const lines = text.split('\n');
-      const maxLines = innerHeight;
+      const maxLines = Math.max(innerHeight, 1);
       const displayLines = lines.slice(0, maxLines);
 
       const justify = obj.textJustify || 'center-center';
@@ -1458,11 +1467,11 @@ AsciiEditor.Editor = class Editor {
 
       let startY;
       if (vAlign === 'top') {
-        startY = y + 1;
+        startY = y + borderOffset;
       } else if (vAlign === 'bottom') {
-        startY = y + height - 1 - displayLines.length;
+        startY = y + height - borderOffset - displayLines.length;
       } else {
-        startY = y + 1 + Math.floor((innerHeight - displayLines.length) / 2);
+        startY = y + borderOffset + Math.floor((innerHeight - displayLines.length) / 2);
       }
 
       displayLines.forEach((line, i) => {
@@ -1470,11 +1479,11 @@ AsciiEditor.Editor = class Editor {
         let textX;
 
         if (hAlign === 'left') {
-          textX = x + 1;
+          textX = x + borderOffset;
         } else if (hAlign === 'right') {
-          textX = x + width - 1 - displayLine.length;
+          textX = x + width - borderOffset - displayLine.length;
         } else {
-          textX = x + 1 + Math.floor((innerWidth - displayLine.length) / 2);
+          textX = x + borderOffset + Math.floor((innerWidth - displayLine.length) / 2);
         }
 
         for (let j = 0; j < displayLine.length; j++) {
