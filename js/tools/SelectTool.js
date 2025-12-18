@@ -701,6 +701,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     const selectedIds = [];
     page.objects.forEach(obj => {
+      // OBJ-9: Skip objects marked as not selectable
+      if (obj.selectable === false) return;
+
       const objX1 = obj.x;
       const objY1 = obj.y;
       const objX2 = obj.x + (obj.width || 10) - 1;
@@ -745,6 +748,8 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     // Check objects in reverse order (top-most first)
     for (let i = page.objects.length - 1; i >= 0; i--) {
       const obj = page.objects[i];
+      // OBJ-9: Skip objects marked as not selectable
+      if (obj.selectable === false) continue;
       if (this.objectContainsPoint(obj, col, row)) {
         return obj;
       }
@@ -956,6 +961,20 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       ctx.setLineDash([]);
     }
 
+    // Get selection styling from CSS variables
+    const selectionPadding = parseInt(styles.getPropertyValue('--selection-padding').trim()) || 4;
+    const selectionDashStr = styles.getPropertyValue('--selection-dash').trim() || '4, 3';
+    const selectionDash = selectionDashStr.split(',').map(s => parseInt(s.trim()));
+    const selectionLineWidth = parseFloat(styles.getPropertyValue('--selection-line-width').trim()) || 1;
+
+    // Per-object-type stroke colors
+    const selectionStrokes = {
+      box: styles.getPropertyValue('--selection-box-stroke').trim() || 'rgba(0, 122, 204, 0.5)',
+      line: styles.getPropertyValue('--selection-line-stroke').trim() || 'rgba(0, 122, 204, 0.5)',
+      text: styles.getPropertyValue('--selection-text-stroke').trim() || 'rgba(0, 122, 204, 0.5)',
+      default: styles.getPropertyValue('--selection-default-stroke').trim() || 'rgba(0, 122, 204, 0.5)'
+    };
+
     // Draw selection rectangles for each selected object
     const isSingleSelection = state.selection.ids.length === 1;
 
@@ -968,10 +987,19 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         const width = bounds.width * context.grid.charWidth;
         const height = bounds.height * context.grid.charHeight;
 
-        ctx.strokeStyle = selectionStroke;
-        ctx.lineWidth = 1;
+        // Get stroke color for this object type
+        const strokeColor = selectionStrokes[obj.type] || selectionStrokes.default;
+
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = selectionLineWidth;
+        ctx.setLineDash(selectionDash);
+        ctx.strokeRect(
+          x - selectionPadding,
+          y - selectionPadding,
+          width + selectionPadding * 2,
+          height + selectionPadding * 2
+        );
         ctx.setLineDash([]);
-        ctx.strokeRect(x - 1, y - 1, width + 2, height + 2);
 
         // SEL-22: Draw resize handles only for single selection
         if (isSingleSelection) {
@@ -980,7 +1008,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
           if (obj.type === 'line') {
             // For lines, draw handles at each point
-            this.drawLineHandles(ctx, obj, context, selectionStroke);
+            this.drawLineHandles(ctx, obj, context);
           } else {
             // Corner handles for boxes
             ctx.fillRect(x - handleSize/2, y - handleSize/2, handleSize, handleSize);
@@ -994,18 +1022,20 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   // Draw handles at each point of a line
-  drawLineHandles(ctx, obj, context, color) {
+  drawLineHandles(ctx, obj, context) {
     if (!obj.points) return;
 
     const handleSize = 6;
-    const segmentHandleSize = 5;
+    const segmentHandleSize = 4;
+    const arrowSize = 3;
+    const arrowOffset = 8;
 
-    // Get segment handle color (different from vertex handles)
+    // Get handle colors from CSS variables
     const styles = getComputedStyle(document.documentElement);
-    const segmentColor = styles.getPropertyValue('--segment-handle').trim() || '#00cc7a';
+    const vertexColor = styles.getPropertyValue('--vertex-handle').trim() || '#007acc';
+    const segmentColor = styles.getPropertyValue('--segment-handle').trim() || '#00aa66';
 
     // Draw segment handles (midpoints) first, so vertex handles appear on top
-    ctx.fillStyle = segmentColor;
     for (let i = 0; i < obj.points.length - 1; i++) {
       const p1 = obj.points[i];
       const p2 = obj.points[i + 1];
@@ -1016,23 +1046,99 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       const midPixelX = midX * context.grid.charWidth + context.grid.charWidth / 2;
       const midPixelY = midY * context.grid.charHeight + context.grid.charHeight / 2;
 
-      // Draw diamond shape for segment handles
-      ctx.beginPath();
-      ctx.moveTo(midPixelX, midPixelY - segmentHandleSize);
-      ctx.lineTo(midPixelX + segmentHandleSize, midPixelY);
-      ctx.lineTo(midPixelX, midPixelY + segmentHandleSize);
-      ctx.lineTo(midPixelX - segmentHandleSize, midPixelY);
-      ctx.closePath();
-      ctx.fill();
+      const isHorizontal = (p1.y === p2.y);
+
+      // Draw square handle (thinner for segments)
+      ctx.fillStyle = segmentColor;
+      ctx.fillRect(midPixelX - segmentHandleSize/2, midPixelY - segmentHandleSize/2, segmentHandleSize, segmentHandleSize);
+
+      // Draw directional arrows
+      ctx.strokeStyle = segmentColor;
+      ctx.lineWidth = 1;
+
+      if (isHorizontal) {
+        // Up/down arrows for horizontal segments
+        // Up arrow
+        ctx.beginPath();
+        ctx.moveTo(midPixelX, midPixelY - arrowOffset);
+        ctx.lineTo(midPixelX - arrowSize, midPixelY - arrowOffset + arrowSize);
+        ctx.moveTo(midPixelX, midPixelY - arrowOffset);
+        ctx.lineTo(midPixelX + arrowSize, midPixelY - arrowOffset + arrowSize);
+        ctx.stroke();
+        // Down arrow
+        ctx.beginPath();
+        ctx.moveTo(midPixelX, midPixelY + arrowOffset);
+        ctx.lineTo(midPixelX - arrowSize, midPixelY + arrowOffset - arrowSize);
+        ctx.moveTo(midPixelX, midPixelY + arrowOffset);
+        ctx.lineTo(midPixelX + arrowSize, midPixelY + arrowOffset - arrowSize);
+        ctx.stroke();
+      } else {
+        // Left/right arrows for vertical segments
+        // Left arrow
+        ctx.beginPath();
+        ctx.moveTo(midPixelX - arrowOffset, midPixelY);
+        ctx.lineTo(midPixelX - arrowOffset + arrowSize, midPixelY - arrowSize);
+        ctx.moveTo(midPixelX - arrowOffset, midPixelY);
+        ctx.lineTo(midPixelX - arrowOffset + arrowSize, midPixelY + arrowSize);
+        ctx.stroke();
+        // Right arrow
+        ctx.beginPath();
+        ctx.moveTo(midPixelX + arrowOffset, midPixelY);
+        ctx.lineTo(midPixelX + arrowOffset - arrowSize, midPixelY - arrowSize);
+        ctx.moveTo(midPixelX + arrowOffset, midPixelY);
+        ctx.lineTo(midPixelX + arrowOffset - arrowSize, midPixelY + arrowSize);
+        ctx.stroke();
+      }
     }
 
-    // Draw vertex handles (squares)
-    ctx.fillStyle = color;
+    // Draw vertex handles (squares with 45-degree arrows)
+    ctx.fillStyle = vertexColor;
+    ctx.strokeStyle = vertexColor;
+    ctx.lineWidth = 1.5;
+
     obj.points.forEach(point => {
       const pixel = context.grid.charToPixel(point.x, point.y);
-      const centerX = pixel.x + context.grid.charWidth / 2;
-      const centerY = pixel.y + context.grid.charHeight / 2;
-      ctx.fillRect(centerX - handleSize/2, centerY - handleSize/2, handleSize, handleSize);
+      const cx = pixel.x + context.grid.charWidth / 2;
+      const cy = pixel.y + context.grid.charHeight / 2;
+
+      // Draw square handle
+      ctx.fillRect(cx - handleSize/2, cy - handleSize/2, handleSize, handleSize);
+
+      // Draw 45-degree arrows (NE, SE, SW, NW)
+      const diagOffset = 7;
+      const diagArrow = 3;
+
+      // NE arrow
+      ctx.beginPath();
+      ctx.moveTo(cx + diagOffset, cy - diagOffset);
+      ctx.lineTo(cx + diagOffset - diagArrow, cy - diagOffset);
+      ctx.moveTo(cx + diagOffset, cy - diagOffset);
+      ctx.lineTo(cx + diagOffset, cy - diagOffset + diagArrow);
+      ctx.stroke();
+
+      // SE arrow
+      ctx.beginPath();
+      ctx.moveTo(cx + diagOffset, cy + diagOffset);
+      ctx.lineTo(cx + diagOffset - diagArrow, cy + diagOffset);
+      ctx.moveTo(cx + diagOffset, cy + diagOffset);
+      ctx.lineTo(cx + diagOffset, cy + diagOffset - diagArrow);
+      ctx.stroke();
+
+      // SW arrow
+      ctx.beginPath();
+      ctx.moveTo(cx - diagOffset, cy + diagOffset);
+      ctx.lineTo(cx - diagOffset + diagArrow, cy + diagOffset);
+      ctx.moveTo(cx - diagOffset, cy + diagOffset);
+      ctx.lineTo(cx - diagOffset, cy + diagOffset - diagArrow);
+      ctx.stroke();
+
+      // NW arrow
+      ctx.beginPath();
+      ctx.moveTo(cx - diagOffset, cy - diagOffset);
+      ctx.lineTo(cx - diagOffset + diagArrow, cy - diagOffset);
+      ctx.moveTo(cx - diagOffset, cy - diagOffset);
+      ctx.lineTo(cx - diagOffset, cy - diagOffset + diagArrow);
+      ctx.stroke();
     });
   }
 };

@@ -35,6 +35,7 @@
 
     <button class="tool-btn" id="btn-grid" title="Toggle Grid (G)">Grid</button>
     <button class="tool-btn" id="btn-export" title="Export ASCII (Ctrl+E)">Export</button>
+    <button class="tool-btn" id="btn-new" title="New Project (Ctrl+N)">New</button>
     <button class="tool-btn" id="btn-save" title="Save (Ctrl+S)">Save</button>
     <button class="tool-btn" id="btn-load" title="Load">Load</button>
   </div>
@@ -72,7 +73,36 @@
     <span class="status-item" id="status-history">History: 0/0</span>
   </div>
 
+  <!-- Debug Panel (hidden by default, toggle with F12) -->
+  <div id="debug-panel" class="hidden">
+    <div class="debug-header">
+      <span>Debug (F12)</span>
+      <label class="debug-mode-toggle">
+        <input type="checkbox" id="debug-mode-checkbox">
+        <span>Debug Mode</span>
+      </label>
+      <button id="debug-close" title="Close">×</button>
+    </div>
+    <div class="debug-tabs">
+      <button class="debug-tab active" data-tab="selection">Selection</button>
+      <button class="debug-tab" data-tab="page">Page</button>
+      <button class="debug-tab" data-tab="project">Project</button>
+      <button class="debug-tab" data-tab="log">Debug Log</button>
+    </div>
+    <div class="debug-content">
+      <div class="debug-actions">
+        <button id="debug-copy" title="Copy to Clipboard">Copy</button>
+        <button id="debug-clear" title="Clear Log" style="display:none;">Clear Log</button>
+      </div>
+      <pre id="debug-json"></pre>
+    </div>
+  </div>
+
+  <!-- Debug Mode Overlay (shown when debug mode is active) -->
+  <div id="debug-overlay" class="hidden">DEBUG MODE</div>
+
   <!-- Core modules (no dependencies) -->
+  <script src="js/core/debug.js"></script>
   <script src="js/core/utils.js"></script>
   <script src="js/core/CharacterGrid.js"></script>
   <script src="js/core/Command.js"></script>

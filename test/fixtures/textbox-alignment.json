@@ -1,0 +1,84 @@
+{
+  "meta": { "name": "Text Alignment Test" },
+  "settings": { "defaultPageWidth": 80, "defaultPageHeight": 30 },
+  "pages": [{
+    "id": "page-1",
+    "name": "Alignment Test",
+    "width": 80,
+    "height": 30,
+    "objects": [
+      {
+        "id": "tl",
+        "type": "box",
+        "x": 1, "y": 1, "width": 18, "height": 7,
+        "style": "single", "shadow": false, "fill": "none",
+        "text": "TOP LEFT",
+        "textJustify": "top-left"
+      },
+      {
+        "id": "tc",
+        "type": "box",
+        "x": 21, "y": 1, "width": 18, "height": 7,
+        "style": "single", "shadow": false, "fill": "none",
+        "text": "TOP CENTER",
+        "textJustify": "top-center"
+      },
+      {
+        "id": "tr",
+        "type": "box",
+        "x": 41, "y": 1, "width": 18, "height": 7,
+        "style": "single", "shadow": false, "fill": "none",
+        "text": "TOP RIGHT",
+        "textJustify": "top-right"
+      },
+      {
+        "id": "cl",
+        "type": "box",
+        "x": 1, "y": 10, "width": 18, "height": 7,
+        "style": "single", "shadow": false, "fill": "none",
+        "text": "CENTER LEFT",
+        "textJustify": "center-left"
+      },
+      {
+        "id": "cc",
+        "type": "box",
+        "x": 21, "y": 10, "width": 18, "height": 7,
+        "style": "single", "shadow": false, "fill": "none",
+        "text": "CENTER",
+        "textJustify": "center-center"
+      },
+      {
+        "id": "cr",
+        "type": "box",
+        "x": 41, "y": 10, "width": 18, "height": 7,
+        "style": "single", "shadow": false, "fill": "none",
+        "text": "CENTER RIGHT",
+        "textJustify": "center-right"
+      },
+      {
+        "id": "bl",
+        "type": "box",
+        "x": 1, "y": 19, "width": 18, "height": 7,
+        "style": "single", "shadow": false, "fill": "none",
+        "text": "BOTTOM LEFT",
+        "textJustify": "bottom-left"
+      },
+      {
+        "id": "bc",
+        "type": "box",
+        "x": 21, "y": 19, "width": 18, "height": 7,
+        "style": "single", "shadow": false, "fill": "none",
+        "text": "BOTTOM CTR",
+        "textJustify": "bottom-center"
+      },
+      {
+        "id": "br",
+        "type": "box",
+        "x": 41, "y": 19, "width": 18, "height": 7,
+        "style": "single", "shadow": false, "fill": "none",
+        "text": "BOTTOM RIGHT",
+        "textJustify": "bottom-right"
+      }
+    ]
+  }]
+}

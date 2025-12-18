@@ -84,6 +84,8 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 - [x] **OBJ-5**: All objects implement hit testing for selection
 - [x] **OBJ-6**: All objects implement rendering to canvas
 - [ ] **OBJ-7**: Objects may have arbitrary key-value parameters (metadata)
+- [x] **OBJ-8**: Objects may have `derived: true` flag indicating computed/derived state
+- [x] **OBJ-9**: Objects may have `selectable: false` flag to exclude from selection
 
 ### Text Box Object
 
@@ -155,6 +157,25 @@ Lines can optionally attach ("stick") to boxes, moving when the box moves.
 - [ ] **OBJ-42**: Connection snaps to nearest valid point on box edge
 - [ ] **OBJ-43**: Visual indicator when hovering near attachable point
 - [ ] **OBJ-44**: Detach by dragging endpoint away from box
+
+### Junction Object
+
+Junctions mark connection points where two or more lines meet. They are computed automatically from line geometry and serve as the foundation for wire connectivity and netlist generation.
+
+- [x] **OBJ-45**: Junction object with x, y position and connectedLines array
+- [x] **OBJ-46**: Auto-create junction when line endpoint clicks on existing line
+- [x] **OBJ-47**: Junction style derived from connected line types (● single, ■ double, █ thick)
+- [x] **OBJ-48**: Junctions recomputed automatically after any line operation
+- [x] **OBJ-49**: Junction stored in file but treated as derived state (recomputable)
+
+### Line Merging
+
+When drawing a new line and clicking on an existing line's start or end vertex, the lines merge into one. This allows extending existing lines after creation.
+
+- [x] **OBJ-4A**: Click on existing line's END vertex → append new points in reverse order
+- [x] **OBJ-4B**: Click on existing line's START vertex → prepend new points to existing line
+- [x] **OBJ-4C**: Merged line inherits style, startCap, endCap from the existing line
+- [x] **OBJ-4D**: Click on mid-segment or intermediate vertex → junction behavior (no merge)
 
 ### Line/Wire Code Sharing Note
 
@@ -364,6 +385,31 @@ When user focuses a mixed field, auto-populate to enable quick editing:
 - [x] **UI-42**: Accent color: #007acc
 - [x] **UI-43**: All colors via CSS variables for theming
 
+### Debug Panel
+
+A collapsible panel for development and debugging that shows JSON representations of the document and selection.
+
+- [x] **UI-50**: Debug panel toggle (keyboard shortcut: F12)
+- [x] **UI-51**: Show full document JSON (project structure)
+- [x] **UI-52**: Show selected object(s) JSON
+- [x] **UI-53**: Collapsible/expandable panel, hidden by default
+- [x] **UI-54**: Copy to clipboard button for JSON output
+
+### Debug Logging System
+
+Centralized debug logging with UI integration, replacing scattered console.log calls.
+
+- [x] **DBG-1**: debug.js module with centralized logging system
+- [x] **DBG-2**: Log levels: info, warn, error, trace with color-coded display
+- [x] **DBG-3**: Category support for filtering by module/component
+- [x] **DBG-4**: Circular log buffer (500 entries max, oldest discarded)
+- [x] **DBG-5**: Debug Log tab in F12 panel showing formatted log entries
+- [x] **DBG-6**: Clear Log button to reset log buffer
+- [x] **DBG-7**: Global debug mode toggle via checkbox in debug panel
+- [x] **DBG-8**: Visual overlay indicator when debug mode is active (red "DEBUG MODE" banner)
+- [x] **DBG-9**: Debug logs always accumulate; console.log output only when debug mode enabled
+- [x] **DBG-10**: Auto-scroll debug log to show latest entries
+
 ---
 
 ## 8. Data Model
@@ -433,6 +479,15 @@ When user focuses a mixed field, auto-populate to enable quick editing:
 - [ ] **EXP-31**: Full styling support
 - [ ] **EXP-32**: For documentation, high-fidelity output
 
+### Netlist Export (Future)
+
+Generate connectivity data from schematic elements (symbols with pins, wires, junctions).
+
+- [ ] **EXP-40**: Export netlist from wires, junctions, and symbol pins
+- [ ] **EXP-41**: Support common netlist formats (SPICE, KiCad, custom)
+- [ ] **EXP-42**: BOM (Bill of Materials) generation from symbols
+- [ ] **EXP-43**: Design rule check: detect unconnected pins, floating nets
+
 ---
 
 ## 10. Visual Style
@@ -496,12 +551,12 @@ When user focuses a mixed field, auto-populate to enable quick editing:
 | Philosophy (PHIL) | 8 | 13 | 62% |
 | Deployment (DEP) | 4 | 5 | 80% |
 | Tools (TOOL) | 2 | 8 | 25% |
-| Objects (OBJ) | 15 | 51 | 29% |
+| Objects (OBJ) | 24 | 60 | 40% |
 | Selection (SEL) | 27 | 27 | 100% |
 | Multi-Select Edit (MSE) | 25 | 25 | 100% |
-| User Interface (UI) | 18 | 18 | 100% |
+| User Interface (UI) | 23 | 23 | 100% |
 | Data Model (DATA) | 10 | 15 | 67% |
-| Export (EXP) | 2 | 12 | 17% |
+| Export (EXP) | 2 | 16 | 13% |
 | Visual (VIS) | 10 | 11 | 91% |
 
 ### Next Priority

@@ -1,0 +1,64 @@
+{
+  "meta": { "name": "Multi-line Text Box Test" },
+  "settings": { "defaultPageWidth": 50, "defaultPageHeight": 25 },
+  "pages": [{
+    "id": "page-1",
+    "name": "Test Page",
+    "width": 50,
+    "height": 25,
+    "objects": [
+      {
+        "id": "box-1",
+        "type": "box",
+        "x": 2,
+        "y": 2,
+        "width": 20,
+        "height": 8,
+        "style": "single",
+        "shadow": false,
+        "fill": "none",
+        "text": "Line One\nLine Two\nLine Three",
+        "textJustify": "center-center"
+      },
+      {
+        "id": "box-2",
+        "type": "box",
+        "x": 25,
+        "y": 2,
+        "width": 20,
+        "height": 8,
+        "style": "double",
+        "shadow": false,
+        "fill": "none",
+        "text": "Top Left\nAligned",
+        "textJustify": "top-left"
+      },
+      {
+        "id": "box-3",
+        "type": "box",
+        "x": 2,
+        "y": 12,
+        "width": 20,
+        "height": 8,
+        "style": "single",
+        "shadow": true,
+        "fill": "none",
+        "text": "With Shadow",
+        "textJustify": "center-center"
+      },
+      {
+        "id": "box-4",
+        "type": "box",
+        "x": 25,
+        "y": 12,
+        "width": 20,
+        "height": 8,
+        "style": "single",
+        "shadow": false,
+        "fill": "light",
+        "text": "With Fill",
+        "textJustify": "center-center"
+      }
+    ]
+  }]
+}

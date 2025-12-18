@@ -205,7 +205,9 @@ AsciiEditor.core.computeJunctions = function(objects) {
           x: x,
           y: y,
           connectedLines: connectedLines,
-          style: junctionStyle
+          style: junctionStyle,
+          derived: true,      // OBJ-8: Computed from line geometry
+          selectable: false   // OBJ-9: Not user-selectable
         };
         junctions.push(junction);
         AsciiEditor.debug.info('Junction', 'Created junction', junction);

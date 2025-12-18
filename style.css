@@ -33,12 +33,24 @@
   --accent-secondary: #00aa66;
   --border: #cccccc;
 
-  /* Selection colors */
+  /* Selection colors - per object type */
+  --selection-box-stroke: rgba(0, 122, 204, 0.5);
+  --selection-line-stroke: rgba(0, 122, 204, 0.5);
+  --selection-text-stroke: rgba(0, 122, 204, 0.5);
+  --selection-default-stroke: rgba(0, 122, 204, 0.5);
+
+  /* Selection rectangle styling */
+  --selection-padding: 4;
+  --selection-dash: 4, 3;
+  --selection-line-width: 1;
+
+  /* Legacy/marquee selection */
   --selection-stroke: #007acc;
   --selection-fill: rgba(0, 122, 204, 0.15);
   --marquee-enclosed-stroke: #007acc;
   --marquee-enclosed-fill: rgba(0, 122, 204, 0.1);
-  --segment-handle: #00aa66;
+  --vertex-handle: #007acc;
+  --segment-handle: #ff8c00;
   --marquee-intersect-stroke: #00aa66;
   --marquee-intersect-fill: rgba(0, 170, 102, 0.1);
 
@@ -463,4 +475,178 @@ kbd {
   outline: none;
   z-index: 100;
   line-height: 20px;
+}
+
+/* ========== Debug Panel ========== */
+#debug-panel {
+  position: fixed;
+  bottom: var(--statusbar-height);
+  left: 0;
+  right: 240px; /* Account for properties panel */
+  height: 300px;
+  background: var(--bg-secondary);
+  border-top: 2px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+}
+
+#debug-panel.hidden {
+  display: none;
+}
+
+.debug-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--accent);
+}
+
+.debug-header button {
+  font-family: var(--font-mono);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.debug-header button:hover {
+  color: var(--text-primary);
+}
+
+.debug-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+}
+
+.debug-tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  color: var(--text-secondary);
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.debug-tab:hover {
+  color: var(--text-primary);
+}
+
+.debug-tab.active {
+  background: var(--accent);
+  color: white;
+}
+
+.debug-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.debug-actions {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.debug-actions button {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text-primary);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.debug-actions button:hover {
+  background: var(--accent);
+  color: white;
+}
+
+#debug-json {
+  flex: 1;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.debug-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.debug-mode-toggle input {
+  cursor: pointer;
+}
+
+.debug-mode-toggle input:checked + span {
+  color: var(--accent);
+  font-weight: bold;
+}
+
+/* Debug Mode Overlay */
+#debug-overlay {
+  position: fixed;
+  top: var(--toolbar-height);
+  right: 250px;
+  background: rgba(255, 0, 0, 0.8);
+  color: white;
+  padding: 4px 12px;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  z-index: 1000;
+}
+
+#debug-overlay.hidden {
+  display: none;
+}
+
+/* Debug log entry styling */
+.debug-log-entry {
+  margin-bottom: 4px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.debug-log-entry.level-error {
+  color: #ff6b6b;
+}
+
+.debug-log-entry.level-warn {
+  color: #ffd93d;
+}
+
+.debug-log-entry.level-info {
+  color: var(--text-primary);
+}
+
+.debug-log-entry.level-trace {
+  color: var(--text-secondary);
 }

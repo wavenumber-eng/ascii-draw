@@ -1,0 +1,25 @@
+{
+  "meta": { "name": "Simple Text Box Test" },
+  "settings": { "defaultPageWidth": 40, "defaultPageHeight": 20 },
+  "pages": [{
+    "id": "page-1",
+    "name": "Test Page",
+    "width": 40,
+    "height": 20,
+    "objects": [
+      {
+        "id": "box-1",
+        "type": "box",
+        "x": 2,
+        "y": 2,
+        "width": 15,
+        "height": 5,
+        "style": "single",
+        "shadow": false,
+        "fill": "none",
+        "text": "Hello World",
+        "textJustify": "center-center"
+      }
+    ]
+  }]
+}
