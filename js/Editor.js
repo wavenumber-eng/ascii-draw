@@ -37,6 +37,9 @@ AsciiEditor.Editor = class Editor {
     this.autoSaveTimer = null;
     this.autoSaveDelay = 2000; // 2 seconds
 
+    // Render batching to prevent flickering
+    this.renderPending = false;
+
     this.init();
 
     if (savedState) {
@@ -1057,19 +1060,26 @@ AsciiEditor.Editor = class Editor {
   }
 
   render() {
-    const state = this.history.getState();
+    // Use requestAnimationFrame to batch renders and prevent flickering
+    if (this.renderPending) return;
+    this.renderPending = true;
 
-    let editContext = null;
-    if (this.editingObjectId) {
-      editContext = {
-        objectId: this.editingObjectId,
-        previewText: this.editPreviewText,
-        cursorVisible: this.cursorVisible,
-        cursorPosition: this.cursorPosition
-      };
-    }
+    requestAnimationFrame(() => {
+      this.renderPending = false;
+      const state = this.history.getState();
 
-    this.renderer.render(state, this.toolManager, editContext);
+      let editContext = null;
+      if (this.editingObjectId) {
+        editContext = {
+          objectId: this.editingObjectId,
+          previewText: this.editPreviewText,
+          cursorVisible: this.cursorVisible,
+          cursorPosition: this.cursorPosition
+        };
+      }
+
+      this.renderer.render(state, this.toolManager, editContext);
+    });
   }
 
   updateUI() {

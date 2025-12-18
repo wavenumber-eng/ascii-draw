@@ -9,7 +9,7 @@ AsciiEditor.tools = AsciiEditor.tools || {};
 AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
   constructor() {
     super('box');
-    this.cursor = 'crosshair';
+    this.cursor = 'none'; // Hide browser cursor, we draw our own
     this.drawing = false;
     this.startPos = null;
     this.currentPos = null;
@@ -17,7 +17,14 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
 
   activate(context) {
     this.drawing = false;
+    this.currentPos = null;
     context.canvas.style.cursor = this.cursor;
+  }
+
+  deactivate() {
+    this.drawing = false;
+    this.startPos = null;
+    this.currentPos = null;
   }
 
   onMouseDown(event, context) {
@@ -29,12 +36,9 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseMove(event, context) {
-    if (this.drawing) {
-      const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-      this.currentPos = { col, row };
-      return true; // Request redraw
-    }
-    return false;
+    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    this.currentPos = { col, row };
+    return true; // Always redraw for crosshair
   }
 
   onMouseUp(event, context) {
@@ -99,18 +103,44 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
   }
 
   renderOverlay(ctx, context) {
+    const styles = getComputedStyle(document.documentElement);
+    const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
+    const grid = context.grid;
+    const offsetX = grid.charWidth / 2;
+    const offsetY = grid.charHeight / 2;
+
+    // Draw crosshair cursor when hovering (not drawing)
+    if (!this.drawing && this.currentPos) {
+      const pixel = grid.charToPixel(this.currentPos.col, this.currentPos.row);
+      const cx = pixel.x + offsetX;
+      const cy = pixel.y + offsetY;
+
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1;
+
+      // Vertical line
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 8);
+      ctx.lineTo(cx, cy + 8);
+      ctx.stroke();
+
+      // Horizontal line
+      ctx.beginPath();
+      ctx.moveTo(cx - 8, cy);
+      ctx.lineTo(cx + 8, cy);
+      ctx.stroke();
+    }
+
+    // Draw drag rectangle when drawing
     if (this.drawing && this.startPos && this.currentPos) {
       const x = Math.min(this.startPos.col, this.currentPos.col);
       const y = Math.min(this.startPos.row, this.currentPos.row);
       const width = Math.abs(this.currentPos.col - this.startPos.col) + 1;
       const height = Math.abs(this.currentPos.row - this.startPos.row) + 1;
 
-      const pixelPos = context.grid.charToPixel(x, y);
-      const pixelWidth = width * context.grid.charWidth;
-      const pixelHeight = height * context.grid.charHeight;
-
-      const styles = getComputedStyle(document.documentElement);
-      const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
+      const pixelPos = grid.charToPixel(x, y);
+      const pixelWidth = width * grid.charWidth;
+      const pixelHeight = height * grid.charHeight;
 
       ctx.strokeStyle = accent;
       ctx.lineWidth = 1;
