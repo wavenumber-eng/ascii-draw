@@ -64,12 +64,35 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 |--------|-----|------|----------|-------------|
 | [x] | **TOOL-20** | SelectTool | V | Select, move, resize objects |
 | [x] | **TOOL-21** | TextBoxTool | B | Create text box with border (default: single) |
-| [ ] | **TOOL-22** | TextBoxTool | T | Create text box without border (style: none) |
-| [ ] | **TOOL-23** | LineTool | L | Create lines and connectors |
+| [x] | **TOOL-22** | TextTool | T | Create text box without border (style: none) |
+| [x] | **TOOL-23** | LineTool | L | Create lines and connectors |
 | [ ] | **TOOL-24** | SymbolTool | S | Create pin/node boxes (schematic symbols) |
 | [ ] | **TOOL-25** | WireTool | W | Create wires with net labels |
 | [ ] | **TOOL-26** | PortTool | P | Create off-page connection ports |
 | [ ] | **TOOL-27** | PowerTool | O | Create power symbols (VCC, GND) |
+| [ ] | **TOOL-28** | PinTool | I | Add pins to symbols |
+| [ ] | **TOOL-29** | DeleteTool | X | Delete objects and segments |
+
+### Pin Tool (TOOL-28)
+
+- [ ] **TOOL-28A**: Shows pin shape preview at cursor (●, ○, ■, □, etc.)
+- [ ] **TOOL-28B**: Cycle shape with number keys (like line styles)
+- [ ] **TOOL-28C**: Hover over symbol edge → shows "PIN" hint indicator
+- [ ] **TOOL-28D**: Click on symbol edge → creates pin at that position
+- [ ] **TOOL-28E**: Click elsewhere → no action (pin only valid on symbol edge)
+- [ ] **TOOL-28F**: Pins auto-created when wire starts/ends on symbol edge (via WireTool)
+
+### Delete Tool (TOOL-29)
+
+Provides granular deletion including line/wire segment deletion that select+Delete cannot do.
+
+- [ ] **TOOL-29A**: Click on box → delete box
+- [ ] **TOOL-29B**: Click on symbol → delete symbol (and all its pins)
+- [ ] **TOOL-29C**: Click on line/wire segment → delete just that segment
+- [ ] **TOOL-29D**: Click on pin → delete pin from parent symbol
+- [ ] **TOOL-29E**: Segment deletion splits line into two separate lines
+- [ ] **TOOL-29F**: Deleting end segment shortens the line
+- [ ] **TOOL-29G**: Deleting only segment (2-point line) deletes entire line
 
 ---
 
@@ -191,19 +214,145 @@ Implementation should use shared base class or utility functions for:
 
 ### Symbol Object (Pin/Node Box)
 
-- [ ] **OBJ-50**: Box with definable pins/nodes on edges
-- [ ] **OBJ-51**: Pin properties: name (inside), number (outside)
-- [ ] **OBJ-52**: Optional designator (U1, R1, IC3) - repositionable
-- [ ] **OBJ-53**: Optional value field
-- [ ] **OBJ-54**: Quick ad-hoc entry - no library required (PHIL-10)
-- [ ] **OBJ-55**: Pins can be added/removed inline (PHIL-11)
+Symbols are schematic components with pins for connectivity. They support inline creation without a library editor.
+
+#### Symbol Base Properties
+
+- [ ] **OBJ-50**: Box-like container with width, height, position
+- [ ] **OBJ-51**: Pins array embedded within symbol (move with symbol)
+- [ ] **OBJ-52**: Quick ad-hoc entry - no library required (PHIL-10)
+- [ ] **OBJ-53**: Pins can be added/removed inline (PHIL-11)
+
+#### Symbol Box Properties (inherited from TextBox)
+
+- [ ] **OBJ-50A**: Border styles: single, double, thick, none (same as box)
+- [ ] **OBJ-50B**: Optional drop shadow using ░ character
+- [ ] **OBJ-50C**: Text content with 9-position justification
+- [ ] **OBJ-50D**: Optional fill property (none, light, medium, dark, solid, dots)
+
+#### Designator (Reference)
+
+- [ ] **OBJ-54**: Designator with prefix + number (U1, R1, IC3)
+- [ ] **OBJ-55**: Auto-increment number per prefix on creation
+- [ ] **OBJ-56**: Designator offset: relative position to symbol (default: 1 cell above, left-aligned)
+- [ ] **OBJ-57**: Designator repositionable - can be moved anywhere relative to symbol
+- [ ] **OBJ-58**: Designator visible flag (can be hidden)
+- [ ] **OBJ-59**: Copy symbol → auto-assigns next available number for prefix
+
+#### Parameters (Value, etc.)
+
+- [ ] **OBJ-5A**: Parameters array: name, value, offset, visible
+- [ ] **OBJ-5B**: Common parameters: value (10k, LM358), footprint (SOIC-8)
+- [ ] **OBJ-5C**: Parameters repositionable like designator
+- [ ] **OBJ-5D**: Parameters visible flag (can be hidden)
+
+#### Symbol Data Structure
+
+```javascript
+{
+  type: 'symbol',
+  id: 'sym-abc123',
+  x: 10, y: 5,
+  width: 8, height: 4,
+  designator: {
+    prefix: 'U',
+    number: 1,
+    offset: { x: 0, y: -1 },
+    visible: true
+  },
+  parameters: [
+    { name: 'value', value: 'LM358', offset: { x: 0, y: 5 }, visible: true },
+    { name: 'footprint', value: 'SOIC-8', offset: { x: 0, y: 6 }, visible: false }
+  ],
+  pins: [
+    { id: 'p1', name: 'IN+', edge: 'left', offset: 0.33, shape: 'circle-outline' },
+    { id: 'p2', name: 'OUT', edge: 'right', offset: 0.5, shape: 'circle' }
+  ]
+}
+```
+
+### Pin Object (Child of Symbol)
+
+Pins are single-character markers on symbol edges for wire connectivity. They reuse the same visual vocabulary as line end caps.
+
+- [ ] **OBJ-5E**: Pin is child of symbol, stored in symbol's pins array
+- [ ] **OBJ-5F**: Pin position: edge (left/right/top/bottom) + offset (0-1 along edge)
+- [ ] **OBJ-5G**: Pin shape: same as line caps (circle, circle-outline, square, square-outline, diamond, diamond-outline, triangle variants)
+- [ ] **OBJ-5H**: Pin properties: id, name, direction (input/output/bidirectional)
+- [ ] **OBJ-5I**: Pin world position computed from symbol position + edge + offset
+- [ ] **OBJ-5J**: Pins snap to character grid positions along edge
+
+#### Pin Data Structure
+
+```javascript
+{
+  id: 'p1',
+  name: 'IN+',
+  edge: 'left',           // left, right, top, bottom
+  offset: 0.33,           // 0-1 along edge length
+  shape: 'circle-outline', // same vocabulary as line caps
+  direction: 'input'      // input, output, bidirectional
+}
+```
 
 ### Wire Object
 
-- [ ] **OBJ-60**: Line with optional net label
-- [ ] **OBJ-61**: Net labels: VCC, GND, SDA, CLK, DATA_BUS, etc.
-- [ ] **OBJ-62**: Same rendering as Line, with label capability
-- [ ] **OBJ-63**: Wires with same net label are logically connected
+Wires are lines with electrical connectivity semantics. They share rendering code with lines but participate in netlist generation.
+
+- [ ] **OBJ-60**: Wire extends line behavior with net metadata
+- [ ] **OBJ-61**: Net property: net name (VCC, GND, SDA, CLK, DATA_BUS)
+- [ ] **OBJ-62**: Same rendering as Line (shared code)
+- [ ] **OBJ-63**: Wires with same net name are logically connected
+- [ ] **OBJ-64**: Bus width property for multi-signal buses (default: 1)
+
+#### Wire-to-Pin Binding
+
+Wire endpoints can bind to symbol pins. When a symbol moves, bound wire endpoints move with it.
+
+- [ ] **OBJ-65**: Wire startBinding/endBinding: { symbolId, pinId } or null
+- [ ] **OBJ-66**: Binding created when wire endpoint placed on pin (snap/auto-create)
+- [ ] **OBJ-67**: Move symbol → bound wire endpoints follow (rubberbanding)
+- [ ] **OBJ-68**: Modifier key (Alt) breaks binding during move
+- [ ] **OBJ-69**: Drag wire endpoint away from pin → breaks binding
+
+#### Wire Data Structure
+
+```javascript
+{
+  type: 'wire',
+  id: 'wire-abc123',
+  points: [{ x: 5, y: 10 }, { x: 10, y: 10 }, { x: 10, y: 15 }],
+  style: 'single',
+  net: 'SDA',
+  busWidth: 1,
+  startBinding: { symbolId: 'sym1', pinId: 'p1' },
+  endBinding: null
+}
+```
+
+### Wire Junction Object
+
+Wire junctions are electrical connection points where wires meet. They are derived from geometry like line junctions but carry electrical semantics for netlist generation.
+
+- [ ] **OBJ-6A**: Wire junction: electrical node where wires connect
+- [ ] **OBJ-6B**: Auto-created when wire endpoint lands on another wire
+- [ ] **OBJ-6C**: Derived state (computed from wire geometry)
+- [ ] **OBJ-6D**: Stores connected wire IDs and computed net name
+- [ ] **OBJ-6E**: Separate from line junctions (electrical vs visual)
+
+#### Wire Junction Data Structure
+
+```javascript
+{
+  type: 'wire-junction',
+  id: 'wj-abc123',
+  x: 10, y: 15,
+  connectedWires: ['wire1', 'wire2'],
+  net: 'SDA',
+  derived: true,
+  selectable: false
+}
+```
 
 ### Port Object
 
@@ -523,12 +672,14 @@ Generate connectivity data from schematic elements (symbols with pins, wires, ju
 |----------|--------|-------------|--------|
 | V | Select tool | TOOL-20 | [x] |
 | B | Box tool | TOOL-21 | [x] |
-| T | Text tool | TOOL-22 | [ ] |
-| L | Line tool | TOOL-23 | [ ] |
+| T | Text tool | TOOL-22 | [x] |
+| L | Line tool | TOOL-23 | [x] |
 | S | Symbol tool | TOOL-24 | [ ] |
 | W | Wire tool | TOOL-25 | [ ] |
 | P | Port tool | TOOL-26 | [ ] |
 | O | Power tool | TOOL-27 | [ ] |
+| I | Pin tool | TOOL-28 | [ ] |
+| X | Delete tool | TOOL-29 | [ ] |
 | G | Toggle grid | UI-4 | [x] |
 | Delete/Backspace | Delete selected | SEL-23 | [x] |
 | Escape | Deselect / Select tool | SEL-13 | [x] |
@@ -550,8 +701,8 @@ Generate connectivity data from schematic elements (symbols with pins, wires, ju
 |----------|-------------|-------|----------|
 | Philosophy (PHIL) | 8 | 13 | 62% |
 | Deployment (DEP) | 4 | 5 | 80% |
-| Tools (TOOL) | 2 | 8 | 25% |
-| Objects (OBJ) | 24 | 60 | 40% |
+| Tools (TOOL) | 4 | 10 | 40% |
+| Objects (OBJ) | 24 | 75 | 32% |
 | Selection (SEL) | 27 | 27 | 100% |
 | Multi-Select Edit (MSE) | 25 | 25 | 100% |
 | User Interface (UI) | 23 | 23 | 100% |
@@ -561,9 +712,11 @@ Generate connectivity data from schematic elements (symbols with pins, wires, ju
 
 ### Next Priority
 
-1. TOOL-22 - Text box without border (T shortcut, style: none)
-2. TOOL-23 (LineTool) - Lines with arrows
-3. TOOL-24 (SymbolTool) - Pin/node boxes for schematic symbols
+1. **TOOL-24 (SymbolTool)** - Create symbols like boxes with designator/parameters
+2. **OBJ-50 to OBJ-5D** - Symbol object model (box properties + designator + parameters)
+3. **OBJ-5E to OBJ-5J** - Pin object model (embedded in symbols)
+4. **TOOL-28 (PinTool)** - Add pins to symbols
+5. **Renderer updates** - Render symbols with pins, designators, parameters
 
 ---
 
