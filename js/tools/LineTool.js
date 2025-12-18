@@ -26,19 +26,13 @@ AsciiEditor.tools.LineStyles = [
     label: 'Thick',
     hotkey: '3',
     chars: { h: '█', v: '█', tl: '█', tr: '█', bl: '█', br: '█' }
-  },
-  {
-    key: 'dashed',
-    label: 'Dashed',
-    hotkey: '4',
-    chars: { h: '┄', v: '┆', tl: '┌', tr: '┐', bl: '└', br: '┘' }
   }
 ];
 
 AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
   constructor() {
     super('line');
-    this.cursor = 'crosshair';
+    this.cursor = 'none'; // Hide browser cursor, we draw our own
     this.drawing = false;
     this.points = [];           // Array of {x, y} committed points
     this.currentPos = null;     // Live cursor position for preview
@@ -154,6 +148,19 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
       for (let i = 1; i < previewPath.length; i++) {
         this.points.push(previewPath[i]);
       }
+
+      // Check if clicked point hits an existing line - auto-finish for connection
+      // (Merging is handled as post-process in recomputeJunctions)
+      const state = context.history.getState();
+      const page = state.project.pages.find(p => p.id === state.activePageId);
+      if (page) {
+        const hits = AsciiEditor.core.findLinesAtPoint(clickPos, page.objects);
+        if (hits.length > 0) {
+          // Found intersection with existing line - finish here
+          this.finishLine(context);
+          return true;
+        }
+      }
     }
 
     this.currentPos = clickPos;
@@ -163,11 +170,7 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
   onMouseMove(event, context) {
     const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
     this.currentPos = { x: col, y: row };
-
-    if (this.drawing) {
-      return true; // OBJ-3A7: Request redraw for real-time preview
-    }
-    return false;
+    return true; // Always redraw for crosshair and connection indicators
   }
 
   onMouseUp(event, context) {
@@ -411,18 +414,84 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
   }
 
   renderOverlay(ctx, context) {
-    if (this.points.length === 0 && !this.currentPos) return;
-
     const styles = getComputedStyle(document.documentElement);
     const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
+    const accentSecondary = styles.getPropertyValue('--accent-secondary').trim() || '#00aa66';
     const textColor = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
+
+    const grid = context.grid;
+    const offsetX = grid.charWidth / 2;
+    const offsetY = grid.charHeight / 2;
+
+    // Get page objects for hover detection
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    const objects = page ? page.objects : [];
+
+    // Detect hover targets - show connection indicator (even before drawing)
+    let hoverTarget = null;
+    if (this.currentPos) {
+      const lineHits = AsciiEditor.core.findLinesAtPoint(this.currentPos, objects);
+      if (lineHits.length > 0) {
+        hoverTarget = { point: this.currentPos };
+      }
+    }
+
+    // Draw connection indicator
+    if (hoverTarget) {
+      const pixel = grid.charToPixel(hoverTarget.point.x, hoverTarget.point.y);
+      const cx = pixel.x + offsetX;
+      const cy = pixel.y + offsetY;
+
+      // Connection indicator: glowing ring
+      ctx.strokeStyle = accentSecondary;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner glow
+      ctx.strokeStyle = 'rgba(0, 170, 102, 0.4)';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Label
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = accentSecondary;
+      ctx.fillText('CONNECT', cx + 12, cy - 8);
+    }
+
+    // Draw crosshair cursor when hovering (before starting to draw)
+    if (!this.drawing && this.currentPos) {
+      const pixel = grid.charToPixel(this.currentPos.x, this.currentPos.y);
+      const cx = pixel.x + offsetX;
+      const cy = pixel.y + offsetY;
+
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1;
+
+      // Vertical line
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 8);
+      ctx.lineTo(cx, cy + 8);
+      ctx.stroke();
+
+      // Horizontal line
+      ctx.beginPath();
+      ctx.moveTo(cx - 8, cy);
+      ctx.lineTo(cx + 8, cy);
+      ctx.stroke();
+    }
+
+    if (this.points.length === 0 && !this.currentPos) return;
 
     // Set up font for ASCII character rendering
     ctx.font = '16px BerkeleyMono, monospace';
     ctx.textBaseline = 'top';
 
     const chars = this.currentStyle.chars;
-    const grid = context.grid;
 
     // Build complete preview path: committed points + preview to cursor
     let allPoints = [...this.points];
@@ -442,8 +511,6 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
 
     // Draw point markers for committed points (small circles)
     ctx.fillStyle = accent;
-    const offsetX = grid.charWidth / 2;
-    const offsetY = grid.charHeight / 2;
 
     for (let i = 0; i < this.points.length; i++) {
       const pixel = grid.charToPixel(this.points[i].x, this.points[i].y);

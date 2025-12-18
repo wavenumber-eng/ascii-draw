@@ -40,7 +40,7 @@ AsciiEditor.Editor = class Editor {
     this.init();
 
     if (savedState) {
-      console.log('Restored project from auto-save');
+      AsciiEditor.debug.info('Editor', 'Restored project from auto-save');
     }
   }
 
@@ -70,6 +70,7 @@ AsciiEditor.Editor = class Editor {
     this.history.subscribe(() => {
       this.render();
       this.updateUI();
+      this.updateDebugPanel();
       this.scheduleAutoSave(); // DATA-50: Auto-save on changes
     });
 
@@ -78,14 +79,14 @@ AsciiEditor.Editor = class Editor {
     this.updateUI();
     this.renderPageTabs();
 
-    console.log('ASCII Diagram Editor initialized');
+    AsciiEditor.debug.info('Editor', 'ASCII Diagram Editor initialized');
   }
 
   async setupFont() {
     try {
       await document.fonts.load('16px BerkeleyMono');
     } catch (e) {
-      console.warn('BerkeleyMono not loaded, using fallback measurements');
+      AsciiEditor.debug.warn('Editor', 'BerkeleyMono not loaded, using fallback measurements');
     }
 
     // Measure character dimensions
@@ -99,7 +100,7 @@ AsciiEditor.Editor = class Editor {
 
     this.grid = new AsciiEditor.core.CharacterGrid(charWidth, charHeight);
 
-    console.log(`Character dimensions: ${charWidth}x${charHeight}`);
+    AsciiEditor.debug.info('Editor', `Character dimensions: ${charWidth}x${charHeight}`);
   }
 
   updateCanvasSize(page) {
@@ -151,8 +152,12 @@ AsciiEditor.Editor = class Editor {
     hk.register('g', () => this.toggleGrid());
 
     // File operations
+    hk.register('ctrl+n', () => this.newProject());
     hk.register('ctrl+s', () => this.saveProject());
     hk.register('ctrl+e', () => this.exportASCII());
+
+    // Debug
+    hk.register('f12', () => this.toggleDebugPanel());
 
     // SEL-40 to SEL-42: Clipboard operations
     hk.register('ctrl+c', () => this.copySelection());
@@ -197,9 +202,13 @@ AsciiEditor.Editor = class Editor {
     document.getElementById('btn-undo').addEventListener('click', () => this.history.undo());
     document.getElementById('btn-redo').addEventListener('click', () => this.history.redo());
     document.getElementById('btn-grid').addEventListener('click', () => this.toggleGrid());
+    document.getElementById('btn-new').addEventListener('click', () => this.newProject());
     document.getElementById('btn-save').addEventListener('click', () => this.saveProject());
     document.getElementById('btn-load').addEventListener('click', () => this.loadProject());
     document.getElementById('btn-export').addEventListener('click', () => this.exportASCII());
+
+    // Debug panel events
+    this.setupDebugPanel();
 
     // Window resize
     window.addEventListener('resize', () => this.render());
@@ -1149,6 +1158,33 @@ AsciiEditor.Editor = class Editor {
   // FILE OPERATIONS (DATA-40 to DATA-42)
   // ============================================================
 
+  newProject() {
+    if (!confirm('Create a new project? Unsaved changes will be lost.')) {
+      return;
+    }
+
+    // Clear localStorage
+    this.clearStorage();
+
+    // Reset to fresh state
+    const freshState = AsciiEditor.core.createInitialState();
+    this.history = new AsciiEditor.core.HistoryManager(freshState);
+    this.history.subscribe(() => {
+      this.render();
+      this.updateUI();
+      this.updateDebugPanel();
+      this.scheduleAutoSave();
+    });
+
+    // Reset view
+    this.updateCanvasSize(freshState.project.pages[0]);
+    this.renderPageTabs();
+    this.updateUI();
+    this.render();
+
+    AsciiEditor.debug.info('Editor', 'New project created');
+  }
+
   saveProject() {
     const state = this.history.getState();
     const json = JSON.stringify(state.project, null, 2);
@@ -1164,7 +1200,7 @@ AsciiEditor.Editor = class Editor {
 
     // DATA-52: Clear auto-save after successful manual save
     this.clearStorage();
-    console.log('Project saved');
+    AsciiEditor.debug.info('Editor', 'Project saved');
   }
 
   loadProject() {
@@ -1191,9 +1227,9 @@ AsciiEditor.Editor = class Editor {
           this.updateCanvasSize(page);
           this.renderPageTabs();
           this.updateUI();
-          console.log('Project loaded');
+          AsciiEditor.debug.info('Editor', 'Project loaded');
         } catch (err) {
-          console.error('Failed to load project:', err);
+          AsciiEditor.debug.error('Editor', 'Failed to load project', err);
           alert('Failed to load project file');
         }
       };
@@ -1227,7 +1263,7 @@ AsciiEditor.Editor = class Editor {
       };
       localStorage.setItem(AsciiEditor.STORAGE_KEY, JSON.stringify(data));
     } catch (e) {
-      console.warn('Auto-save failed:', e);
+      AsciiEditor.debug.warn('Editor', 'Auto-save failed', e);
     }
   }
 
@@ -1247,7 +1283,7 @@ AsciiEditor.Editor = class Editor {
 
       return state;
     } catch (e) {
-      console.warn('Failed to load auto-save:', e);
+      AsciiEditor.debug.warn('Editor', 'Failed to load auto-save', e);
       return null;
     }
   }
@@ -1257,7 +1293,7 @@ AsciiEditor.Editor = class Editor {
     try {
       localStorage.removeItem(AsciiEditor.STORAGE_KEY);
     } catch (e) {
-      console.warn('Failed to clear auto-save:', e);
+      AsciiEditor.debug.warn('Editor', 'Failed to clear auto-save', e);
     }
   }
 
@@ -1280,7 +1316,7 @@ AsciiEditor.Editor = class Editor {
       .map(obj => JSON.parse(JSON.stringify(obj)));
 
     this.clipboard = selectedObjects;
-    console.log(`Copied ${this.clipboard.length} object(s) to clipboard`);
+    AsciiEditor.debug.info('Editor', `Copied ${this.clipboard.length} object(s) to clipboard`);
   }
 
   // SEL-41, SEL-43, SEL-44, SEL-45: Paste clipboard contents
@@ -1312,7 +1348,7 @@ AsciiEditor.Editor = class Editor {
       selection: { ids: newIds, handles: null }
     }));
 
-    console.log(`Pasted ${newIds.length} object(s)`);
+    AsciiEditor.debug.info('Editor', `Pasted ${newIds.length} object(s)`);
   }
 
   // SEL-42: Cut = copy + delete
@@ -1340,7 +1376,7 @@ AsciiEditor.Editor = class Editor {
       selection: { ids: [], handles: null }
     }));
 
-    console.log(`Cut ${this.clipboard.length} object(s)`);
+    AsciiEditor.debug.info('Editor', `Cut ${this.clipboard.length} object(s)`);
   }
 
   // ============================================================
@@ -1372,7 +1408,7 @@ AsciiEditor.Editor = class Editor {
     a.click();
 
     URL.revokeObjectURL(url);
-    console.log('ASCII exported');
+    AsciiEditor.debug.info('Editor', 'ASCII exported');
   }
 
   renderObjectToBuffer(buffer, obj) {
@@ -1380,6 +1416,8 @@ AsciiEditor.Editor = class Editor {
       this.renderBoxToBuffer(buffer, obj);
     } else if (obj.type === 'line') {
       this.renderLineToBuffer(buffer, obj);
+    } else if (obj.type === 'junction') {
+      this.renderJunctionToBuffer(buffer, obj);
     }
   }
 
@@ -1596,5 +1634,188 @@ AsciiEditor.Editor = class Editor {
       const capChar = caps[endCap][dir];
       if (capChar) setChar(points[points.length - 1].x, points[points.length - 1].y, capChar);
     }
+  }
+
+  renderJunctionToBuffer(buffer, obj) {
+    const { x, y, style } = obj;
+
+    // Junction characters based on style
+    const junctionChars = {
+      single: '●',
+      double: '■',
+      thick: '█'
+    };
+
+    const char = junctionChars[style] || junctionChars.single;
+
+    if (y >= 0 && y < buffer.length && x >= 0 && x < buffer[0].length) {
+      buffer[y][x] = char;
+    }
+  }
+
+  // ============================================================
+  // DEBUG PANEL (UI-50 to UI-54)
+  // ============================================================
+
+  setupDebugPanel() {
+    this.debugPanel = document.getElementById('debug-panel');
+    this.debugJson = document.getElementById('debug-json');
+    this.debugOverlay = document.getElementById('debug-overlay');
+    this.debugTab = 'selection'; // 'selection', 'page', 'project', 'log'
+
+    // Close button
+    document.getElementById('debug-close').addEventListener('click', () => {
+      this.toggleDebugPanel();
+    });
+
+    // Tab buttons
+    document.querySelectorAll('.debug-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        this.debugTab = tab.dataset.tab;
+        document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        // Show/hide Clear Log button based on tab
+        const clearBtn = document.getElementById('debug-clear');
+        if (clearBtn) {
+          clearBtn.style.display = this.debugTab === 'log' ? 'inline-block' : 'none';
+        }
+
+        this.updateDebugPanel();
+      });
+    });
+
+    // Copy button
+    document.getElementById('debug-copy').addEventListener('click', () => {
+      this.copyDebugJson();
+    });
+
+    // Clear Log button
+    const clearBtn = document.getElementById('debug-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        AsciiEditor.debug.clear();
+        this.updateDebugPanel();
+      });
+    }
+
+    // Debug mode checkbox
+    const debugModeCheckbox = document.getElementById('debug-mode-checkbox');
+    if (debugModeCheckbox) {
+      // Initialize from current state
+      debugModeCheckbox.checked = AsciiEditor.debug.isEnabled();
+
+      debugModeCheckbox.addEventListener('change', () => {
+        AsciiEditor.debug.setEnabled(debugModeCheckbox.checked);
+        this.updateDebugOverlay();
+      });
+    }
+
+    // Subscribe to debug log updates to refresh panel
+    AsciiEditor.debug.subscribe(() => {
+      if (!this.debugPanel.classList.contains('hidden') && this.debugTab === 'log') {
+        this.updateDebugPanel();
+      }
+      this.updateDebugOverlay();
+    });
+
+    // Initialize overlay state
+    this.updateDebugOverlay();
+  }
+
+  updateDebugOverlay() {
+    if (this.debugOverlay) {
+      if (AsciiEditor.debug.isEnabled()) {
+        this.debugOverlay.classList.remove('hidden');
+      } else {
+        this.debugOverlay.classList.add('hidden');
+      }
+    }
+  }
+
+  toggleDebugPanel() {
+    this.debugPanel.classList.toggle('hidden');
+    if (!this.debugPanel.classList.contains('hidden')) {
+      this.updateDebugPanel();
+    }
+  }
+
+  updateDebugPanel() {
+    if (this.debugPanel.classList.contains('hidden')) return;
+
+    const state = this.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+
+    // Handle log tab separately - it's not JSON
+    if (this.debugTab === 'log') {
+      this.renderDebugLog();
+      return;
+    }
+
+    let data;
+
+    switch (this.debugTab) {
+      case 'selection':
+        const selectedIds = state.selection.ids || [];
+        if (selectedIds.length === 0) {
+          data = { message: 'No selection', selectionState: state.selection };
+        } else {
+          const selectedObjects = page.objects.filter(o => selectedIds.includes(o.id));
+          data = selectedObjects.length === 1 ? selectedObjects[0] : selectedObjects;
+        }
+        break;
+
+      case 'page':
+        data = page;
+        break;
+
+      case 'project':
+        data = state.project;
+        break;
+
+      default:
+        data = {};
+    }
+
+    this.debugJson.textContent = JSON.stringify(data, null, 2);
+  }
+
+  renderDebugLog() {
+    const log = AsciiEditor.debug.getLog();
+
+    if (log.length === 0) {
+      this.debugJson.innerHTML = '<span style="color: var(--text-secondary);">No debug messages yet. Enable Debug Mode to capture logs.</span>';
+      return;
+    }
+
+    // Render log entries with colored levels
+    const html = log.map(entry => {
+      const dataStr = entry.data ? '\n  ' + JSON.stringify(entry.data, null, 2).split('\n').join('\n  ') : '';
+      return `<div class="debug-log-entry level-${entry.level}">[${entry.time}] [${entry.level.toUpperCase()}] [${entry.category}] ${this.escapeHtml(entry.message)}${this.escapeHtml(dataStr)}</div>`;
+    }).join('');
+
+    this.debugJson.innerHTML = html;
+
+    // Auto-scroll to bottom
+    this.debugJson.scrollTop = this.debugJson.scrollHeight;
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  copyDebugJson() {
+    const text = this.debugJson.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      // Brief visual feedback
+      const btn = document.getElementById('debug-copy');
+      const original = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = original, 1000);
+    }).catch(err => {
+      AsciiEditor.debug.error('Editor', 'Failed to copy', err);
+    });
   }
 };

@@ -18,9 +18,9 @@ AsciiEditor.rendering.Renderer = class Renderer {
     try {
       await document.fonts.load('16px BerkeleyMono');
       this.fontLoaded = true;
-      console.log('BerkeleyMono font loaded');
+      AsciiEditor.debug.info('Renderer', 'BerkeleyMono font loaded');
     } catch (e) {
-      console.warn('Could not load BerkeleyMono, using fallback');
+      AsciiEditor.debug.warn('Renderer', 'Could not load BerkeleyMono, using fallback');
     }
   }
 
@@ -224,10 +224,38 @@ AsciiEditor.rendering.Renderer = class Renderer {
       case 'text':
         this.drawText(obj.text || '', obj.x, obj.y);
         break;
+      case 'junction':
+        this.drawJunction(obj);
+        break;
       default:
-        // Placeholder for unimplemented types
-        this.drawBox({ ...obj, width: obj.width || 10, height: obj.height || 3 });
+        // Unknown type - log warning but don't render anything that might obscure content
+        AsciiEditor.debug.warn('Renderer', 'Unknown object type', { type: obj.type, obj });
     }
+  }
+
+  // OBJ-47: Draw junction with style-based character
+  drawJunction(obj) {
+    const { x, y, style } = obj;
+
+    const cssStyles = getComputedStyle(document.documentElement);
+    const color = cssStyles.getPropertyValue('--text-canvas').trim() || '#cccccc';
+
+    // Clear the cell first to remove overlapping line characters
+    const px = x * this.grid.charWidth;
+    const py = y * this.grid.charHeight;
+    const bgCanvas = cssStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+    this.ctx.fillStyle = bgCanvas;
+    this.ctx.fillRect(px, py, this.grid.charWidth, this.grid.charHeight);
+
+    // Junction characters based on connected line style
+    const junctionChars = {
+      single: '●',
+      double: '■',
+      thick: '█'
+    };
+
+    const char = junctionChars[style] || junctionChars.single;
+    this.drawChar(char, x, y, color);
   }
 
   // OBJ-30 to OBJ-37: Line/polyline rendering
@@ -275,11 +303,14 @@ AsciiEditor.rendering.Renderer = class Renderer {
       }
     }
 
-    // Draw endpoint caps
-    if (startCap && startCap !== 'none') {
+    // Draw endpoint caps (skip if endpoint is a junction - junction takes precedence)
+    const startKey = `${points[0].x},${points[0].y}`;
+    const endKey = `${points[points.length - 1].x},${points[points.length - 1].y}`;
+
+    if (startCap && startCap !== 'none' && !this.junctionPoints?.has(startKey)) {
       this.drawEndCap(points[0], points[1], startCap, true, color);
     }
-    if (endCap && endCap !== 'none') {
+    if (endCap && endCap !== 'none' && !this.junctionPoints?.has(endKey)) {
       this.drawEndCap(points[points.length - 1], points[points.length - 2], endCap, false, color);
     }
   }
@@ -379,6 +410,14 @@ AsciiEditor.rendering.Renderer = class Renderer {
 
     // Draw grid
     this.drawGrid(page.width, page.height, state.ui.gridVisible);
+
+    // Collect junction positions - end caps should not be drawn at junctions
+    this.junctionPoints = new Set();
+    page.objects.forEach(obj => {
+      if (obj.type === 'junction') {
+        this.junctionPoints.add(`${obj.x},${obj.y}`);
+      }
+    });
 
     // Draw all objects
     page.objects.forEach(obj => {
