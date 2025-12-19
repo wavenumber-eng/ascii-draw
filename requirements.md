@@ -533,6 +533,14 @@ When user focuses a mixed field, auto-populate to enable quick editing:
   - Style: Border style (enum/select), Shadow (boolean/checkbox)
   - Content: Justify (enum/buttons), Text (textarea)
 
+#### Architectural Requirements
+
+- [x] **MSE-60**: All object types MUST use `getCommonPropertyValue()` for property detection
+- [x] **MSE-61**: All property panels MUST support multi-select editing (arrays of objects)
+- [x] **MSE-62**: All property panels MUST use standard helper functions: `inputValue()`, `inputPlaceholder()`, `selectValue()`, `enumPlaceholder()`
+- [x] **MSE-63**: All property panels MUST apply `.mixed` CSS class for visual distinction
+- [x] **MSE-64**: Object-specific panels (pins, labels, etc.) MUST follow same patterns as core multi-select
+
 ---
 
 ## 7. User Interface

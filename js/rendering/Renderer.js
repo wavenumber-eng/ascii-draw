@@ -236,39 +236,166 @@ AsciiEditor.rendering.Renderer = class Renderer {
     }
   }
 
-  // OBJ-50 to OBJ-5J: Symbol rendering (box + designator + parameters + pins)
+  // OBJ-50 to OBJ-5J: Symbol rendering with explicit layer order (SYM-R1 to SYM-R12)
+  // Order: 1.Border → 2.Fill → 3.Pins → 4.Pin Names → 5.Text → 6.Designator → 7.Parameters
   drawSymbol(obj) {
-    // Draw the box portion (reuse box rendering for border, fill, text)
-    this.drawBox(obj);
-
     const styles = getComputedStyle(document.documentElement);
     const color = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
     const accentColor = styles.getPropertyValue('--accent').trim() || '#007acc';
 
-    // Draw designator if visible
+    // SYM-R1: Draw border (and shadow)
+    this.drawSymbolBorder(obj, color);
+
+    // SYM-R2: Draw fill
+    this.drawSymbolFill(obj, color);
+
+    // SYM-R3 & SYM-R4: Draw pins and pin names
+    if (obj.pins && obj.pins.length > 0) {
+      this.drawSymbolPins(obj);
+    }
+
+    // SYM-R5: Draw internal text
+    this.drawSymbolInternalText(obj, color);
+
+    // SYM-R6: Draw designator (on top of fill when inside)
     if (obj.designator && obj.designator.visible) {
       const desig = obj.designator;
       const designatorText = `${desig.prefix}${desig.number}`;
       const desigX = obj.x + (desig.offset?.x || 0);
       const desigY = obj.y + (desig.offset?.y || -1);
-      this.drawText(designatorText, desigX, desigY, accentColor);
+      this.drawText(designatorText, desigX, desigY, color, true);
     }
 
-    // Draw visible parameters
+    // SYM-R7: Draw visible parameters (on top of fill when inside)
     if (obj.parameters && obj.parameters.length > 0) {
       obj.parameters.forEach(param => {
         if (param.visible && param.value) {
           const paramX = obj.x + (param.offset?.x || 0);
           const paramY = obj.y + (param.offset?.y || obj.height);
-          this.drawText(param.value, paramX, paramY, color);
+          this.drawText(param.value, paramX, paramY, color, true);
         }
       });
     }
+  }
 
-    // Draw pins on edges
-    if (obj.pins && obj.pins.length > 0) {
-      this.drawSymbolPins(obj);
+  // SYM-R1: Draw symbol border (and shadow)
+  drawSymbolBorder(obj, color) {
+    const { x, y, width, height, style, shadow } = obj;
+
+    const chars = {
+      single: { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' },
+      double: { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' },
+      thick: { tl: '█', tr: '█', bl: '█', br: '█', h: '█', v: '█' }
+    };
+
+    const c = chars[style] || chars.single;
+    const hasBorder = style && style !== 'none';
+    const styles = getComputedStyle(document.documentElement);
+    const shadowColor = styles.getPropertyValue('--text-shadow').trim() || '#555555';
+
+    // Draw shadow first if enabled
+    if (shadow && hasBorder) {
+      for (let row = 1; row <= height; row++) {
+        this.drawChar('░', x + width, y + row, shadowColor);
+      }
+      for (let col = 1; col < width; col++) {
+        this.drawChar('░', x + col, y + height, shadowColor);
+      }
+      this.drawChar('░', x + width, y + height, shadowColor);
     }
+
+    // Draw border
+    if (hasBorder) {
+      this.drawChar(c.tl, x, y, color);
+      for (let col = 1; col < width - 1; col++) {
+        this.drawChar(c.h, x + col, y, color);
+      }
+      this.drawChar(c.tr, x + width - 1, y, color);
+
+      for (let row = 1; row < height - 1; row++) {
+        this.drawChar(c.v, x, y + row, color);
+        this.drawChar(c.v, x + width - 1, y + row, color);
+      }
+
+      this.drawChar(c.bl, x, y + height - 1, color);
+      for (let col = 1; col < width - 1; col++) {
+        this.drawChar(c.h, x + col, y + height - 1, color);
+      }
+      this.drawChar(c.br, x + width - 1, y + height - 1, color);
+    }
+  }
+
+  // SYM-R2: Draw symbol fill
+  drawSymbolFill(obj, color) {
+    const { x, y, width, height, style } = obj;
+    const hasBorder = style && style !== 'none';
+
+    const fillChars = {
+      'none': null,
+      'light': '░',
+      'medium': '▒',
+      'dark': '▓',
+      'solid': '█',
+      'dots': '·'
+    };
+    const fillChar = fillChars[obj.fill];
+
+    if (fillChar) {
+      const startCol = hasBorder ? 1 : 0;
+      const endCol = hasBorder ? width - 1 : width;
+      const startRow = hasBorder ? 1 : 0;
+      const endRow = hasBorder ? height - 1 : height;
+
+      for (let row = startRow; row < endRow; row++) {
+        for (let col = startCol; col < endCol; col++) {
+          this.drawChar(fillChar, x + col, y + row, color);
+        }
+      }
+    }
+  }
+
+  // SYM-R5: Draw symbol internal text
+  drawSymbolInternalText(obj, color) {
+    if (!obj.text) return;
+
+    const { x, y, width, height, style } = obj;
+    const hasBorder = style && style !== 'none';
+    const hasFill = obj.fill && obj.fill !== 'none';
+
+    const borderOffset = hasBorder ? 1 : 0;
+    const innerWidth = hasBorder ? width - 2 : width;
+    const innerHeight = hasBorder ? height - 2 : height;
+    const lines = obj.text.split('\n');
+
+    const maxLines = Math.max(innerHeight, 1);
+    const displayLines = lines.slice(0, maxLines);
+
+    const justify = obj.textJustify || 'center-center';
+    const [vAlign, hAlign] = justify.split('-');
+
+    let startY;
+    if (vAlign === 'top') {
+      startY = y + borderOffset;
+    } else if (vAlign === 'bottom') {
+      startY = y + height - borderOffset - displayLines.length;
+    } else {
+      startY = y + borderOffset + Math.floor((innerHeight - displayLines.length) / 2);
+    }
+
+    displayLines.forEach((line, i) => {
+      const displayLine = line.length > innerWidth ? line.substring(0, innerWidth) : line;
+      let textX;
+
+      if (hAlign === 'left') {
+        textX = x + borderOffset;
+      } else if (hAlign === 'right') {
+        textX = x + width - borderOffset - displayLine.length;
+      } else {
+        textX = x + borderOffset + Math.floor((innerWidth - displayLine.length) / 2);
+      }
+
+      this.drawText(displayLine, textX, startY + i, color, hasFill);
+    });
   }
 
   // Draw pins on symbol edges
@@ -317,6 +444,19 @@ AsciiEditor.rendering.Renderer = class Renderer {
 
     const { x, y, width, height } = symbol;
 
+    // Get background color for clearing fill characters under pin names
+    const styles = getComputedStyle(document.documentElement);
+    const bgCanvas = styles.getPropertyValue('--bg-canvas').trim() || '#ffffff';
+
+    // Helper to clear background and draw character
+    const drawPinChar = (char, charX, charY) => {
+      const px = charX * this.grid.charWidth;
+      const py = charY * this.grid.charHeight;
+      this.ctx.fillStyle = bgCanvas;
+      this.ctx.fillRect(px, py, this.grid.charWidth, this.grid.charHeight);
+      this.drawChar(char, charX, charY, color);
+    };
+
     switch (pin.edge) {
       case 'left':
         // OBJ-5O: Left edge - name starts 1 cell right of pin (inside symbol)
@@ -325,7 +465,7 @@ AsciiEditor.rendering.Renderer = class Renderer {
           const nameX = pinPos.x + 1 + i;
           // Don't draw outside symbol interior
           if (nameX < x + width - 1) {
-            this.drawChar(name[i], nameX, pinPos.y, color);
+            drawPinChar(name[i], nameX, pinPos.y);
           }
         }
         break;
@@ -338,7 +478,7 @@ AsciiEditor.rendering.Renderer = class Renderer {
           const nameX = startX + i;
           // Don't draw outside symbol interior
           if (nameX > x) {
-            this.drawChar(name[i], nameX, pinPos.y, color);
+            drawPinChar(name[i], nameX, pinPos.y);
           }
         }
         break;
@@ -351,7 +491,7 @@ AsciiEditor.rendering.Renderer = class Renderer {
           const nameX = topCenterX + i;
           // Stay within symbol bounds horizontally
           if (nameX > x && nameX < x + width - 1) {
-            this.drawChar(name[i], nameX, pinPos.y + 1, color);
+            drawPinChar(name[i], nameX, pinPos.y + 1);
           }
         }
         break;
@@ -364,7 +504,7 @@ AsciiEditor.rendering.Renderer = class Renderer {
           const nameX = bottomCenterX + i;
           // Stay within symbol bounds horizontally
           if (nameX > x && nameX < x + width - 1) {
-            this.drawChar(name[i], nameX, pinPos.y - 1, color);
+            drawPinChar(name[i], nameX, pinPos.y - 1);
           }
         }
         break;
@@ -563,13 +703,15 @@ AsciiEditor.rendering.Renderer = class Renderer {
     }
   }
 
+  // VIS-50 to VIS-55: Multi-pass rendering with type-based layers
+  // Order: Grid → Lines/Junctions → Boxes/Text → Symbols → Tool Overlays
   render(state, toolManager, editContext = null) {
     this.clear();
 
     const page = state.project.pages.find(p => p.id === state.activePageId);
     if (!page) return;
 
-    // Draw grid
+    // VIS-40: Draw grid (Layer 0)
     this.drawGrid(page.width, page.height, state.ui.gridVisible);
 
     // Collect junction positions - end caps should not be drawn at junctions
@@ -580,23 +722,46 @@ AsciiEditor.rendering.Renderer = class Renderer {
       }
     });
 
-    // Draw all objects
-    page.objects.forEach(obj => {
-      // If this object is being edited, use preview text
+    // Helper to draw an object with edit context support
+    const drawWithEditContext = (obj) => {
       if (editContext && editContext.objectId === obj.id && editContext.previewText !== null) {
         const previewObj = { ...obj, text: editContext.previewText };
         this.drawObject(previewObj);
-
-        // Draw blinking cursor if visible
         if (editContext.cursorVisible) {
           this.drawEditCursor(previewObj, editContext.cursorPosition);
         }
       } else {
         this.drawObject(obj);
       }
+    };
+
+    // VIS-41 to VIS-44: PASS 1 - Lines and line junctions (lowest layer)
+    page.objects.forEach(obj => {
+      if (obj.type === 'line') {
+        drawWithEditContext(obj);
+      }
+    });
+    page.objects.forEach(obj => {
+      if (obj.type === 'junction') {
+        drawWithEditContext(obj);
+      }
     });
 
-    // Draw tool overlay
+    // VIS-45 to VIS-46: PASS 2 - Boxes and text (middle layer)
+    page.objects.forEach(obj => {
+      if (obj.type === 'box' || obj.type === 'text') {
+        drawWithEditContext(obj);
+      }
+    });
+
+    // VIS-47 to VIS-4D: PASS 3 - Symbols (top layer - includes pins, designators)
+    page.objects.forEach(obj => {
+      if (obj.type === 'symbol') {
+        drawWithEditContext(obj);
+      }
+    });
+
+    // VIS-4A: Draw tool overlay (always on top)
     toolManager.renderOverlay(this.ctx);
   }
 

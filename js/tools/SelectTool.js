@@ -14,7 +14,8 @@ const SelectMode = {
   RESIZING: 'resizing',           // Resizing single object (boxes)
   LINE_POINT: 'line_point',       // Dragging a line vertex
   LINE_SEGMENT: 'line_segment',   // Dragging a line segment midpoint
-  PIN_DRAG: 'pin_drag'            // Dragging a pin along symbol edge
+  PIN_DRAG: 'pin_drag',           // Dragging a pin along symbol edge
+  LABEL_DRAG: 'label_drag'        // Dragging a designator or parameter label
 };
 
 // Resize handle positions
@@ -43,6 +44,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.pinDragSymbolId = null;      // Symbol containing the pin
     this.pinDragPinId = null;         // Pin being dragged
     this.pinOriginal = null;          // Original pin data for undo
+    // Label dragging state (designator/parameters)
+    this.labelDragSymbolId = null;    // Parent symbol ID
+    this.labelDragType = null;        // 'designator' or 'parameter'
+    this.labelDragParamIndex = null;  // For parameters, which index
+    this.labelOriginalOffset = null;  // Original offset for undo
     // Line segment dragging state
     this.lineSegmentIndex = null;     // Index of segment being dragged (segment between points i and i+1)
     this.lineSegmentIsHorizontal = null; // True if segment is horizontal
@@ -78,6 +84,10 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.pinDragSymbolId = null;
     this.pinDragPinId = null;
     this.pinOriginal = null;
+    this.labelDragSymbolId = null;
+    this.labelDragType = null;
+    this.labelDragParamIndex = null;
+    this.labelOriginalOffset = null;
   }
 
   onMouseDown(event, context) {
@@ -114,6 +124,30 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       }
     }
 
+    // Check for label hit (designator/parameter - before pins and objects)
+    const labelHit = this.hitTestLabel(col, row, context);
+    if (labelHit) {
+      this.mode = SelectMode.LABEL_DRAG;
+      this.labelDragSymbolId = labelHit.symbolId;
+      this.labelDragType = labelHit.type;
+      this.labelDragParamIndex = labelHit.paramIndex;
+      this.labelOriginalOffset = { ...labelHit.offset };
+      this.dragStart = { col, row };
+
+      // Select the parent symbol AND track the selected label
+      context.history.updateState(s => ({
+        ...s,
+        selection: {
+          ids: [labelHit.symbolId],
+          handles: null,
+          pinIds: [],
+          labelType: labelHit.type,
+          labelParamIndex: labelHit.paramIndex
+        }
+      }));
+      return true;
+    }
+
     // Check for pin hit (before object hit so pins take priority)
     const pinHit = this.hitTestPin(col, row, context);
     if (pinHit) {
@@ -123,11 +157,49 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       this.pinOriginal = { ...pinHit.pin };
       this.dragStart = { col, row };
 
-      // Select the parent symbol AND track the selected pin
-      context.history.updateState(s => ({
-        ...s,
-        selection: { ids: [pinHit.symbolId], handles: null, pinId: pinHit.pinId }
-      }));
+      // Multi-select pins with Ctrl+click
+      if (event.ctrlKey) {
+        const currentPinIds = state.selection.pinIds || [];
+        const isAlreadySelected = currentPinIds.includes(pinHit.pinId);
+
+        if (isAlreadySelected) {
+          // Remove from selection
+          context.history.updateState(s => ({
+            ...s,
+            selection: {
+              ...s.selection,
+              pinIds: currentPinIds.filter(id => id !== pinHit.pinId),
+              labelType: null,
+              labelParamIndex: null
+            }
+          }));
+        } else {
+          // Add to selection (must be same parent symbol for now)
+          const newPinIds = state.selection.ids.includes(pinHit.symbolId)
+            ? [...currentPinIds, pinHit.pinId]
+            : [pinHit.pinId];
+          const newSymbolIds = state.selection.ids.includes(pinHit.symbolId)
+            ? state.selection.ids
+            : [pinHit.symbolId];
+
+          context.history.updateState(s => ({
+            ...s,
+            selection: {
+              ids: newSymbolIds,
+              handles: null,
+              pinIds: newPinIds,
+              labelType: null,
+              labelParamIndex: null
+            }
+          }));
+        }
+      } else {
+        // Single pin selection
+        context.history.updateState(s => ({
+          ...s,
+          selection: { ids: [pinHit.symbolId], handles: null, pinIds: [pinHit.pinId], labelType: null, labelParamIndex: null }
+        }));
+      }
       return true;
     }
 
@@ -145,7 +217,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
             selection: {
               ids: s.selection.ids.filter(id => id !== hit.id),
               handles: null,
-              pinId: null  // Clear pin selection
+              pinIds: [],
+              labelType: null,
+              labelParamIndex: null
             }
           }));
         } else {
@@ -154,22 +228,24 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
             selection: {
               ids: [...s.selection.ids, hit.id],
               handles: null,
-              pinId: null  // Clear pin selection
+              pinIds: [],
+              labelType: null,
+              labelParamIndex: null
             }
           }));
         }
       } else {
-        // SEL-10: Regular click - select this object (clear pin selection)
+        // SEL-10: Regular click - select this object (clear pin/label selection)
         if (!isAlreadySelected) {
           context.history.updateState(s => ({
             ...s,
-            selection: { ids: [hit.id], handles: null, pinId: null }
+            selection: { ids: [hit.id], handles: null, pinIds: [], labelType: null, labelParamIndex: null }
           }));
         } else {
-          // Clear pin selection when clicking on already-selected object (not on a pin)
+          // Clear pin/label selection when clicking on already-selected object
           context.history.updateState(s => ({
             ...s,
-            selection: { ...s.selection, pinId: null }
+            selection: { ...s.selection, pinIds: [], labelType: null, labelParamIndex: null }
           }));
         }
       }
@@ -195,7 +271,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       if (!event.ctrlKey) {
         context.history.updateState(s => ({
           ...s,
-          selection: { ids: [], handles: null, pinId: null }
+          selection: { ids: [], handles: null, pinIds: [], labelType: null, labelParamIndex: null }
         }));
       }
       this.mode = SelectMode.MARQUEE;
@@ -248,6 +324,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     if (this.mode === SelectMode.PIN_DRAG && this.pinDragSymbolId) {
       this.performPinDrag(col, row, context);
+      return true;
+    }
+
+    if (this.mode === SelectMode.LABEL_DRAG && this.labelDragSymbolId) {
+      this.performLabelDrag(col, row, context);
       return true;
     }
 
@@ -335,6 +416,10 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       this.finalizePinDrag(context);
     }
 
+    if (this.mode === SelectMode.LABEL_DRAG && this.labelOriginalOffset) {
+      this.finalizeLabelDrag(context);
+    }
+
     if (this.mode === SelectMode.MARQUEE) {
       this.performMarqueeSelect(context);
     }
@@ -359,10 +444,35 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           });
           context.history.updateState(s => ({
             ...s,
-            selection: { ids: [], handles: null }
+            selection: { ids: [], handles: null, pinIds: [], labelType: null, labelParamIndex: null }
           }));
         }
         return true;
+      }
+    }
+
+    // OBJ-5A: Type to edit label - if label is selected and printable key pressed, start editing
+    if (state.selection.ids.length === 1 && state.selection.labelType && event.key.length === 1 && !event.ctrlKey && !event.altKey) {
+      const page = state.project.pages.find(p => p.id === state.activePageId);
+      if (page) {
+        const obj = page.objects.find(o => o.id === state.selection.ids[0]);
+        if (obj && obj.type === 'symbol' && context.startLabelEdit) {
+          context.startLabelEdit(obj, state.selection.labelType, state.selection.labelParamIndex, event.key);
+          return true;
+        }
+      }
+    }
+
+    // OBJ-5N: Type to edit pin - if pin(s) selected and printable key pressed, start editing pin name
+    const selectedPinIds = state.selection.pinIds || [];
+    if (selectedPinIds.length > 0 && event.key.length === 1 && !event.ctrlKey && !event.altKey) {
+      const page = state.project.pages.find(p => p.id === state.activePageId);
+      if (page && state.selection.ids.length === 1) {
+        const symbol = page.objects.find(o => o.id === state.selection.ids[0]);
+        if (symbol && symbol.type === 'symbol' && context.startPinEdit) {
+          context.startPinEdit(symbol, selectedPinIds, event.key);
+          return true;
+        }
       }
     }
 
@@ -384,6 +494,21 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   // SEL-30: Double-click to edit
   onDoubleClick(event, context) {
     const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+
+    // OBJ-5A: Check for label double-click first
+    const labelHit = this.hitTestLabel(col, row, context);
+    if (labelHit && context.startLabelEdit) {
+      const state = context.history.getState();
+      const page = state.project.pages.find(p => p.id === state.activePageId);
+      if (page) {
+        const symbol = page.objects.find(o => o.id === labelHit.symbolId);
+        if (symbol) {
+          context.startLabelEdit(symbol, labelHit.type, labelHit.paramIndex, null);
+          return true;
+        }
+      }
+    }
+
     const hit = this.hitTestObject(col, row, context);
 
     if (hit && (hit.type === 'box' || hit.type === 'symbol')) {
@@ -772,12 +897,12 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       const newIds = [...new Set([...existingIds, ...selectedIds])];
       context.history.updateState(s => ({
         ...s,
-        selection: { ids: newIds, handles: null, pinId: null }
+        selection: { ids: newIds, handles: null, pinIds: [], labelType: null, labelParamIndex: null }
       }));
     } else {
       context.history.updateState(s => ({
         ...s,
-        selection: { ids: selectedIds, handles: null, pinId: null }
+        selection: { ids: selectedIds, handles: null, pinIds: [], labelType: null, labelParamIndex: null }
       }));
     }
   }
@@ -1141,6 +1266,176 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     }
   }
 
+  // OBJ-5A1 to OBJ-5A8: Hit test for designator and parameter labels
+  hitTestLabel(col, row, context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return null;
+
+    const symbols = page.objects.filter(o => o.type === 'symbol');
+
+    for (const symbol of symbols) {
+      // Check designator
+      if (symbol.designator && symbol.designator.visible) {
+        const desig = symbol.designator;
+        const designatorText = `${desig.prefix}${desig.number}`;
+        const desigX = symbol.x + (desig.offset?.x || 0);
+        const desigY = symbol.y + (desig.offset?.y || -1);
+
+        // Check if click is within the designator text bounds
+        if (row === desigY && col >= desigX && col < desigX + designatorText.length) {
+          return {
+            symbolId: symbol.id,
+            type: 'designator',
+            paramIndex: null,
+            offset: desig.offset || { x: 0, y: -1 },
+            text: designatorText
+          };
+        }
+      }
+
+      // Check parameters
+      if (symbol.parameters && symbol.parameters.length > 0) {
+        for (let i = 0; i < symbol.parameters.length; i++) {
+          const param = symbol.parameters[i];
+          if (param.visible && param.value) {
+            const paramX = symbol.x + (param.offset?.x || 0);
+            const paramY = symbol.y + (param.offset?.y || symbol.height);
+
+            // Check if click is within the parameter text bounds
+            if (row === paramY && col >= paramX && col < paramX + param.value.length) {
+              return {
+                symbolId: symbol.id,
+                type: 'parameter',
+                paramIndex: i,
+                offset: param.offset || { x: 0, y: symbol.height },
+                text: param.value
+              };
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  // OBJ-5A3 to OBJ-5A5: Drag label to new position (offset relative to symbol)
+  performLabelDrag(col, row, context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const symbol = page.objects.find(o => o.id === this.labelDragSymbolId);
+    if (!symbol) return;
+
+    // Calculate new offset relative to symbol position
+    const newOffset = {
+      x: col - symbol.x,
+      y: row - symbol.y
+    };
+
+    // Update the label's position in state
+    context.history.updateState(s => {
+      const newState = AsciiEditor.core.deepClone(s);
+      const pg = newState.project.pages.find(p => p.id === s.activePageId);
+      if (pg) {
+        const sym = pg.objects.find(o => o.id === this.labelDragSymbolId);
+        if (sym) {
+          if (this.labelDragType === 'designator' && sym.designator) {
+            sym.designator.offset = newOffset;
+          } else if (this.labelDragType === 'parameter' && sym.parameters && this.labelDragParamIndex !== null) {
+            if (sym.parameters[this.labelDragParamIndex]) {
+              sym.parameters[this.labelDragParamIndex].offset = newOffset;
+            }
+          }
+        }
+      }
+      return newState;
+    });
+  }
+
+  // OBJ-5A6: Finalize label drag with undo support
+  finalizeLabelDrag(context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const symbol = page.objects.find(o => o.id === this.labelDragSymbolId);
+    if (!symbol) return;
+
+    let currentOffset = null;
+    let propPath = null;
+
+    if (this.labelDragType === 'designator' && symbol.designator) {
+      currentOffset = symbol.designator.offset;
+      propPath = 'designator';
+    } else if (this.labelDragType === 'parameter' && symbol.parameters && this.labelDragParamIndex !== null) {
+      const param = symbol.parameters[this.labelDragParamIndex];
+      if (param) {
+        currentOffset = param.offset;
+        propPath = 'parameters';
+      }
+    }
+
+    if (!currentOffset) return;
+
+    // Check if offset actually changed
+    const hasChanged = currentOffset.x !== this.labelOriginalOffset.x ||
+                       currentOffset.y !== this.labelOriginalOffset.y;
+
+    if (hasChanged) {
+      // Restore original
+      context.history.updateState(s => {
+        const newState = AsciiEditor.core.deepClone(s);
+        const pg = newState.project.pages.find(p => p.id === s.activePageId);
+        if (pg) {
+          const sym = pg.objects.find(o => o.id === this.labelDragSymbolId);
+          if (sym) {
+            if (this.labelDragType === 'designator' && sym.designator) {
+              sym.designator.offset = { ...this.labelOriginalOffset };
+            } else if (this.labelDragType === 'parameter' && sym.parameters && this.labelDragParamIndex !== null) {
+              if (sym.parameters[this.labelDragParamIndex]) {
+                sym.parameters[this.labelDragParamIndex].offset = { ...this.labelOriginalOffset };
+              }
+            }
+          }
+        }
+        return newState;
+      });
+
+      // Execute command for undo/redo
+      if (this.labelDragType === 'designator') {
+        const newDesig = { ...symbol.designator, offset: { ...currentOffset } };
+        const oldDesig = { ...symbol.designator, offset: { ...this.labelOriginalOffset } };
+        context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+          state.activePageId,
+          symbol.id,
+          { designator: oldDesig },
+          { designator: newDesig }
+        ));
+      } else if (this.labelDragType === 'parameter') {
+        const newParams = symbol.parameters.map((p, i) => {
+          if (i === this.labelDragParamIndex) {
+            return { ...p, offset: { ...currentOffset } };
+          }
+          return { ...p };
+        });
+        const oldParams = symbol.parameters.map((p, i) => {
+          if (i === this.labelDragParamIndex) {
+            return { ...p, offset: { ...this.labelOriginalOffset } };
+          }
+          return { ...p };
+        });
+        context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+          state.activePageId,
+          symbol.id,
+          { parameters: oldParams },
+          { parameters: newParams }
+        ));
+      }
+    }
+  }
+
   // SEL-3: Visual distinction for marquee modes
   renderOverlay(ctx, context) {
     const state = context.history.getState();
@@ -1244,33 +1539,114 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       }
     });
 
-    // Draw selected pin highlight
-    if (state.selection.pinId && state.selection.ids.length === 1) {
-      const symbol = page.objects.find(o => o.id === state.selection.ids[0]);
-      if (symbol && symbol.type === 'symbol' && symbol.pins) {
-        const pin = symbol.pins.find(p => p.id === state.selection.pinId);
-        if (pin) {
-          const pos = this.getPinPosition(symbol, pin);
-          const pixel = context.grid.charToPixel(pos.x, pos.y);
+    // Draw selected pin highlight(s)
+    const selectedPinIds = state.selection.pinIds || [];
+    if (selectedPinIds.length > 0) {
+      // Get all symbols that might contain selected pins
+      state.selection.ids.forEach(symbolId => {
+        const symbol = page.objects.find(o => o.id === symbolId);
+        if (symbol && symbol.type === 'symbol' && symbol.pins) {
+          symbol.pins.forEach(pin => {
+            if (selectedPinIds.includes(pin.id)) {
+              const pos = this.getPinPosition(symbol, pin);
+              const pixel = context.grid.charToPixel(pos.x, pos.y);
 
-          // Draw highlight box around the selected pin
-          ctx.strokeStyle = pinSelectionColor;
+              // Draw highlight box around the selected pin
+              ctx.strokeStyle = pinSelectionColor;
+              ctx.lineWidth = 2;
+              ctx.setLineDash([]);
+              ctx.strokeRect(
+                pixel.x - 2,
+                pixel.y - 2,
+                context.grid.charWidth + 4,
+                context.grid.charHeight + 4
+              );
+
+              // Draw corner markers
+              const markerSize = 4;
+              ctx.fillStyle = pinSelectionColor;
+              ctx.fillRect(pixel.x - 2, pixel.y - 2, markerSize, markerSize);
+              ctx.fillRect(pixel.x + context.grid.charWidth + 2 - markerSize, pixel.y - 2, markerSize, markerSize);
+              ctx.fillRect(pixel.x - 2, pixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
+              ctx.fillRect(pixel.x + context.grid.charWidth + 2 - markerSize, pixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
+            }
+          });
+        }
+      });
+    }
+
+    // OBJ-5A7, OBJ-5A8: Draw selected label highlight and leader line
+    if (state.selection.labelType && state.selection.ids.length === 1) {
+      const symbol = page.objects.find(o => o.id === state.selection.ids[0]);
+      if (symbol && symbol.type === 'symbol') {
+        let labelOffset = null;
+        let labelText = '';
+
+        if (state.selection.labelType === 'designator' && symbol.designator && symbol.designator.visible) {
+          const desig = symbol.designator;
+          labelOffset = desig.offset || { x: 0, y: -1 };
+          labelText = `${desig.prefix}${desig.number}`;
+        } else if (state.selection.labelType === 'parameter' && symbol.parameters && state.selection.labelParamIndex !== null) {
+          const param = symbol.parameters[state.selection.labelParamIndex];
+          if (param && param.visible) {
+            labelOffset = param.offset || { x: 0, y: symbol.height };
+            labelText = param.value || '';
+          }
+        }
+
+        if (labelOffset && labelText.length > 0) {
+          const labelX = symbol.x + labelOffset.x;
+          const labelY = symbol.y + labelOffset.y;
+          const labelPixel = context.grid.charToPixel(labelX, labelY);
+          const labelWidth = labelText.length * context.grid.charWidth;
+
+          // Draw highlight box around the selected label
+          const labelSelectionColor = styles.getPropertyValue('--accent').trim() || '#007acc';
+          ctx.strokeStyle = labelSelectionColor;
           ctx.lineWidth = 2;
           ctx.setLineDash([]);
           ctx.strokeRect(
-            pixel.x - 2,
-            pixel.y - 2,
-            context.grid.charWidth + 4,
+            labelPixel.x - 2,
+            labelPixel.y - 2,
+            labelWidth + 4,
             context.grid.charHeight + 4
           );
 
           // Draw corner markers
           const markerSize = 4;
-          ctx.fillStyle = pinSelectionColor;
-          ctx.fillRect(pixel.x - 2, pixel.y - 2, markerSize, markerSize);
-          ctx.fillRect(pixel.x + context.grid.charWidth + 2 - markerSize, pixel.y - 2, markerSize, markerSize);
-          ctx.fillRect(pixel.x - 2, pixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
-          ctx.fillRect(pixel.x + context.grid.charWidth + 2 - markerSize, pixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
+          ctx.fillStyle = labelSelectionColor;
+          ctx.fillRect(labelPixel.x - 2, labelPixel.y - 2, markerSize, markerSize);
+          ctx.fillRect(labelPixel.x + labelWidth + 2 - markerSize, labelPixel.y - 2, markerSize, markerSize);
+          ctx.fillRect(labelPixel.x - 2, labelPixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
+          ctx.fillRect(labelPixel.x + labelWidth + 2 - markerSize, labelPixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
+
+          // OBJ-5A8: Draw dashed leader line from symbol center to label
+          const symbolCenterPixel = context.grid.charToPixel(
+            symbol.x + Math.floor(symbol.width / 2),
+            symbol.y + Math.floor(symbol.height / 2)
+          );
+          const symbolCX = symbolCenterPixel.x + context.grid.charWidth / 2;
+          const symbolCY = symbolCenterPixel.y + context.grid.charHeight / 2;
+
+          // Label anchor point (center of label)
+          const labelCX = labelPixel.x + labelWidth / 2;
+          const labelCY = labelPixel.y + context.grid.charHeight / 2;
+
+          // Draw dashed line
+          ctx.strokeStyle = labelSelectionColor;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(symbolCX, symbolCY);
+          ctx.lineTo(labelCX, labelCY);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Draw small circle at symbol center
+          ctx.fillStyle = labelSelectionColor;
+          ctx.beginPath();
+          ctx.arc(symbolCX, symbolCY, 3, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
     }
