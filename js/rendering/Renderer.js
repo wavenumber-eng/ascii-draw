@@ -224,11 +224,17 @@ AsciiEditor.rendering.Renderer = class Renderer {
       case 'line':
         this.drawLine(obj);
         break;
+      case 'wire':
+        this.drawWire(obj);
+        break;
       case 'text':
         this.drawText(obj.text || '', obj.x, obj.y);
         break;
       case 'junction':
         this.drawJunction(obj);
+        break;
+      case 'wire-junction':
+        this.drawWireJunction(obj);
         break;
       default:
         // Unknown type - log warning but don't render anything that might obscure content
@@ -559,6 +565,31 @@ AsciiEditor.rendering.Renderer = class Renderer {
     this.drawChar(char, x, y, color);
   }
 
+  // OBJ-6A to OBJ-6D: Draw wire junction (electrical connection point)
+  drawWireJunction(obj) {
+    const { x, y, style } = obj;
+
+    const cssStyles = getComputedStyle(document.documentElement);
+    const accentSecondary = cssStyles.getPropertyValue('--accent-secondary').trim() || '#00aa66';
+
+    // Clear the cell first
+    const px = x * this.grid.charWidth;
+    const py = y * this.grid.charHeight;
+    const bgCanvas = cssStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+    this.ctx.fillStyle = bgCanvas;
+    this.ctx.fillRect(px, py, this.grid.charWidth, this.grid.charHeight);
+
+    // Wire junctions use filled circle in accent-secondary color
+    const junctionChars = {
+      single: '●',
+      double: '●',
+      thick: '█'
+    };
+
+    const char = junctionChars[style] || junctionChars.single;
+    this.drawChar(char, x, y, accentSecondary);
+  }
+
   // OBJ-30 to OBJ-37: Line/polyline rendering
   drawLine(obj) {
     const { points, style, startCap, endCap } = obj;
@@ -613,6 +644,47 @@ AsciiEditor.rendering.Renderer = class Renderer {
     }
     if (endCap && endCap !== 'none' && !this.junctionPoints?.has(endKey)) {
       this.drawEndCap(points[points.length - 1], points[points.length - 2], endCap, false, color);
+    }
+  }
+
+  // OBJ-60 to OBJ-6D: Wire rendering (electrical connectivity)
+  drawWire(obj) {
+    // Wires render same as lines - reuse drawLine logic
+    this.drawLine(obj);
+
+    // OBJ-62: Draw net label if present
+    if (obj.net) {
+      this.drawWireNetLabel(obj);
+    }
+  }
+
+  // OBJ-62: Draw net label near middle of wire
+  drawWireNetLabel(wire) {
+    if (!wire.points || wire.points.length < 2) return;
+
+    const cssStyles = getComputedStyle(document.documentElement);
+    const accentSecondary = cssStyles.getPropertyValue('--accent-secondary').trim() || '#00aa66';
+
+    // Find midpoint of wire path
+    const midIndex = Math.floor((wire.points.length - 1) / 2);
+    const p1 = wire.points[midIndex];
+    const p2 = wire.points[midIndex + 1] || p1;
+
+    // Calculate midpoint of the middle segment
+    const midX = Math.round((p1.x + p2.x) / 2);
+    const midY = Math.round((p1.y + p2.y) / 2);
+
+    // Determine if segment is horizontal or vertical for label placement
+    const isHorizontal = p1.y === p2.y;
+
+    // Draw net label slightly offset from the wire
+    const labelX = midX;
+    const labelY = isHorizontal ? midY - 1 : midY;
+
+    // Draw each character of the net label
+    const label = wire.net;
+    for (let i = 0; i < label.length; i++) {
+      this.drawChar(label[i], labelX + i, labelY, accentSecondary);
     }
   }
 
@@ -743,6 +815,20 @@ AsciiEditor.rendering.Renderer = class Renderer {
     });
     page.objects.forEach(obj => {
       if (obj.type === 'junction') {
+        drawWithEditContext(obj);
+      }
+    });
+
+    // VIS-41A: PASS 1B - Wires (electrical connections, above visual lines)
+    page.objects.forEach(obj => {
+      if (obj.type === 'wire') {
+        drawWithEditContext(obj);
+      }
+    });
+
+    // VIS-41B: PASS 1C - Wire junctions (electrical connection points)
+    page.objects.forEach(obj => {
+      if (obj.type === 'wire-junction') {
         drawWithEditContext(obj);
       }
     });

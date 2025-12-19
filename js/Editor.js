@@ -131,6 +131,7 @@ AsciiEditor.Editor = class Editor {
     this.toolManager.register(new AsciiEditor.tools.SelectTool());
     this.toolManager.register(new AsciiEditor.tools.BoxTool());
     this.toolManager.register(new AsciiEditor.tools.LineTool());
+    this.toolManager.register(new AsciiEditor.tools.WireTool());
     this.toolManager.register(new AsciiEditor.tools.TextTool());
     this.toolManager.register(new AsciiEditor.tools.SymbolTool());
     this.toolManager.register(new AsciiEditor.tools.PinTool());
@@ -795,6 +796,8 @@ AsciiEditor.Editor = class Editor {
         this.renderSymbolProperties(obj);
       } else if (obj.type === 'line') {
         this.renderLineProperties(obj);
+      } else if (obj.type === 'wire') {
+        this.renderWireProperties(obj);
       } else {
         content.innerHTML = `<div class="property-empty">Unknown object type</div>`;
       }
@@ -1983,6 +1986,78 @@ AsciiEditor.Editor = class Editor {
     }
   }
 
+  // OBJ-61, OBJ-62: Wire properties panel
+  renderWireProperties(obj) {
+    const content = document.getElementById('properties-content');
+    const style = obj.style || 'single';
+    const net = obj.net || '';
+    const pointCount = obj.points ? obj.points.length : 0;
+
+    // Build style options from LineStyles definition
+    const lineStyles = AsciiEditor.tools.LineStyles || [];
+    const styleOptions = lineStyles.map(s =>
+      `<option value="${s.key}" ${style === s.key ? 'selected' : ''}>${s.chars.h} ${s.label} (${s.hotkey})</option>`
+    ).join('');
+
+    content.innerHTML = `
+      <div class="property-group">
+        <div class="property-group-title">Wire Info</div>
+        <div class="property-row">
+          <span class="property-label">Points</span>
+          <span class="property-value">${pointCount}</span>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Net</div>
+        <div class="property-row">
+          <span class="property-label">Net Name</span>
+          <input type="text" class="property-input" id="prop-net" value="${net}" placeholder="e.g., SDA, VCC">
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Style</div>
+        <div class="property-row">
+          <span class="property-label">Wire Style</span>
+          <select class="property-select" id="prop-style">
+            ${styleOptions}
+          </select>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Bindings</div>
+        <div class="property-row">
+          <span class="property-label">Start</span>
+          <span class="property-value">${obj.startBinding ? `${obj.startBinding.symbolId}.${obj.startBinding.pinId}` : 'None'}</span>
+        </div>
+        <div class="property-row">
+          <span class="property-label">End</span>
+          <span class="property-value">${obj.endBinding ? `${obj.endBinding.symbolId}.${obj.endBinding.pinId}` : 'None'}</span>
+        </div>
+      </div>
+    `;
+
+    this.wireWirePropertyListeners(obj);
+  }
+
+  wireWirePropertyListeners(obj) {
+    const netInput = document.getElementById('prop-net');
+    if (netInput) {
+      netInput.addEventListener('change', () => {
+        this.updateObjectProperty(obj.id, 'net', netInput.value);
+      });
+    }
+
+    const styleSelect = document.getElementById('prop-style');
+    if (styleSelect) {
+      styleSelect.addEventListener('change', () => {
+        this.updateObjectProperty(obj.id, 'style', styleSelect.value);
+      });
+    }
+  }
+
   updateObjectProperty(objectId, property, value) {
     const state = this.history.getState();
     const page = state.project.pages.find(p => p.id === state.activePageId);
@@ -2505,6 +2580,8 @@ AsciiEditor.Editor = class Editor {
       this.renderBoxToBuffer(buffer, obj);
     } else if (obj.type === 'line') {
       this.renderLineToBuffer(buffer, obj);
+    } else if (obj.type === 'wire') {
+      this.renderWireToBuffer(buffer, obj);
     } else if (obj.type === 'junction') {
       this.renderJunctionToBuffer(buffer, obj);
     }
@@ -2739,6 +2816,33 @@ AsciiEditor.Editor = class Editor {
 
     if (y >= 0 && y < buffer.length && x >= 0 && x < buffer[0].length) {
       buffer[y][x] = char;
+    }
+  }
+
+  // OBJ-60 to OBJ-62: Wire export (same as line + net label)
+  renderWireToBuffer(buffer, obj) {
+    // Render wire segments like lines
+    this.renderLineToBuffer(buffer, obj);
+
+    // Also render net label if present
+    if (obj.net && obj.points && obj.points.length >= 2) {
+      const midIndex = Math.floor((obj.points.length - 1) / 2);
+      const p1 = obj.points[midIndex];
+      const p2 = obj.points[midIndex + 1] || p1;
+
+      const midX = Math.round((p1.x + p2.x) / 2);
+      const midY = Math.round((p1.y + p2.y) / 2);
+
+      const isHorizontal = p1.y === p2.y;
+      const labelY = isHorizontal ? midY - 1 : midY;
+
+      // Write net label characters
+      for (let i = 0; i < obj.net.length; i++) {
+        const labelX = midX + i;
+        if (labelY >= 0 && labelY < buffer.length && labelX >= 0 && labelX < buffer[0].length) {
+          buffer[labelY][labelX] = obj.net[i];
+        }
+      }
     }
   }
 

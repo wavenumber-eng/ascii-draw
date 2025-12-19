@@ -1,33 +1,14 @@
 /**
  * LineTool - Create polylines with orthogonal segments
  * Implements: TOOL-23, OBJ-30 to OBJ-3A8
+ * Uses shared utilities from AsciiEditor.core.lineUtils
  */
 
 var AsciiEditor = AsciiEditor || {};
 AsciiEditor.tools = AsciiEditor.tools || {};
 
-// Line style definitions - single source of truth for all style metadata
-// To add a new style: add entry here with key, label, chars, and assign a hotkey
-AsciiEditor.tools.LineStyles = [
-  {
-    key: 'single',
-    label: 'Single',
-    hotkey: '1',
-    chars: { h: '─', v: '│', tl: '┌', tr: '┐', bl: '└', br: '┘' }
-  },
-  {
-    key: 'double',
-    label: 'Double',
-    hotkey: '2',
-    chars: { h: '═', v: '║', tl: '╔', tr: '╗', bl: '╚', br: '╝' }
-  },
-  {
-    key: 'thick',
-    label: 'Thick',
-    hotkey: '3',
-    chars: { h: '█', v: '█', tl: '█', tr: '█', bl: '█', br: '█' }
-  }
-];
+// Expose LineStyles from shared lineUtils for backward compatibility
+AsciiEditor.tools.LineStyles = AsciiEditor.core.lineUtils.styles;
 
 AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
   constructor() {
@@ -37,16 +18,11 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
     this.points = [];           // Array of {x, y} committed points
     this.currentPos = null;     // Live cursor position for preview
     this.hFirst = true;         // OBJ-3A3: Posture - true = horizontal-first, false = vertical-first
-    this.styleIndex = 0;        // Index into LineStyles array
+    this.styleIndex = 0;        // Index into styles array
 
-    // Build lookup maps from LineStyles
-    this.styles = AsciiEditor.tools.LineStyles;
-    this.styleByKey = {};
-    this.styleByHotkey = {};
-    for (const style of this.styles) {
-      this.styleByKey[style.key] = style;
-      this.styleByHotkey[style.hotkey] = style;
-    }
+    // Reference shared utilities
+    this.lineUtils = AsciiEditor.core.lineUtils;
+    this.styles = this.lineUtils.styles;
   }
 
   // Get current style object
@@ -67,6 +43,15 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
     }
   }
 
+  // Build hotkey lookup from styles
+  get styleByHotkey() {
+    const lookup = {};
+    this.styles.forEach(s => {
+      lookup[s.hotkey] = s;
+    });
+    return lookup;
+  }
+
   activate(context) {
     this.drawing = false;
     this.points = [];
@@ -84,29 +69,10 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
 
   /**
    * OBJ-3A1, OBJ-3A2: Calculate preview points from anchor to cursor
-   * Returns array of points representing the orthogonal path
+   * Delegates to shared lineUtils
    */
   getPreviewPath(anchor, cursor) {
-    if (!anchor || !cursor) return [];
-
-    const dx = cursor.x - anchor.x;
-    const dy = cursor.y - anchor.y;
-
-    // OBJ-3A1: Axis-aligned case - straight line
-    if (dx === 0 || dy === 0) {
-      return [anchor, cursor];
-    }
-
-    // OBJ-3A2: Diagonal case - need intermediate point based on posture
-    if (this.hFirst) {
-      // OBJ-3A4: Horizontal-first: go horizontal, then vertical
-      const intermediate = { x: cursor.x, y: anchor.y };
-      return [anchor, intermediate, cursor];
-    } else {
-      // OBJ-3A5: Vertical-first: go vertical, then horizontal
-      const intermediate = { x: anchor.x, y: cursor.y };
-      return [anchor, intermediate, cursor];
-    }
+    return this.lineUtils.getPreviewPath(anchor, cursor, this.hFirst);
   }
 
   /**
@@ -290,127 +256,20 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
 
   /**
    * Simplify points by removing redundant collinear points.
-   * Three consecutive points on the same axis (same X or same Y)
-   * means the middle point is redundant and can be removed.
+   * Delegates to shared lineUtils
    */
   simplifyPoints(points) {
-    if (points.length < 3) return points;
-
-    const result = [points[0]];
-
-    for (let i = 1; i < points.length - 1; i++) {
-      const prev = result[result.length - 1];
-      const curr = points[i];
-      const next = points[i + 1];
-
-      // Check if curr is collinear between prev and next
-      const sameX = (prev.x === curr.x && curr.x === next.x);
-      const sameY = (prev.y === curr.y && curr.y === next.y);
-
-      // Keep the point only if it's NOT collinear (i.e., it's a real corner)
-      if (!sameX && !sameY) {
-        result.push(curr);
-      }
-    }
-
-    // Always add the last point
-    result.push(points[points.length - 1]);
-
-    return result;
-  }
-
-  /**
-   * Get direction from one point to another
-   */
-  getDirection(from, to) {
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    if (dx > 0) return 'right';
-    if (dx < 0) return 'left';
-    if (dy > 0) return 'down';
-    if (dy < 0) return 'up';
-    return 'none';
-  }
-
-  /**
-   * Get corner character based on incoming and outgoing directions
-   */
-  getCornerChar(prev, curr, next, chars) {
-    const inDir = this.getDirection(prev, curr);
-    const outDir = this.getDirection(curr, next);
-
-    const cornerMap = {
-      'right-down': chars.tr,
-      'right-up': chars.br,
-      'left-down': chars.tl,
-      'left-up': chars.bl,
-      'down-right': chars.bl,
-      'down-left': chars.br,
-      'up-right': chars.tl,
-      'up-left': chars.tr
-    };
-
-    return cornerMap[`${inDir}-${outDir}`] || null;
-  }
-
-  /**
-   * Draw a character at grid position using canvas context
-   */
-  drawChar(ctx, char, col, row, grid, color) {
-    const x = col * grid.charWidth;
-    const y = row * grid.charHeight;
-    ctx.fillStyle = color;
-    ctx.fillText(char, x, y + 2);
+    return this.lineUtils.simplifyPoints(points);
   }
 
   /**
    * Draw line segments using ASCII characters
+   * Delegates to shared lineUtils
    */
   drawLineSegments(ctx, points, chars, grid, color) {
-    if (points.length < 2) return;
-
-    // Draw each segment
-    for (let i = 0; i < points.length - 1; i++) {
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const dx = Math.sign(p2.x - p1.x);
-      const dy = Math.sign(p2.y - p1.y);
-
-      if (dx !== 0 && dy === 0) {
-        // Horizontal segment
-        const startX = Math.min(p1.x, p2.x);
-        const endX = Math.max(p1.x, p2.x);
-        for (let x = startX; x <= endX; x++) {
-          this.drawChar(ctx, chars.h, x, p1.y, grid, color);
-        }
-      } else if (dy !== 0 && dx === 0) {
-        // Vertical segment
-        const startY = Math.min(p1.y, p2.y);
-        const endY = Math.max(p1.y, p2.y);
-        for (let y = startY; y <= endY; y++) {
-          this.drawChar(ctx, chars.v, p1.x, y, grid, color);
-        }
-      }
-    }
-
-    // Draw corners at intermediate points (clear cell first to avoid overlap)
-    for (let i = 1; i < points.length - 1; i++) {
-      const prev = points[i - 1];
-      const curr = points[i];
-      const next = points[i + 1];
-      const cornerChar = this.getCornerChar(prev, curr, next, chars);
-      if (cornerChar) {
-        // Clear the cell first
-        const cx = curr.x * grid.charWidth;
-        const cy = curr.y * grid.charHeight;
-        const bgStyles = getComputedStyle(document.documentElement);
-        const bgCanvas = bgStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
-        ctx.fillStyle = bgCanvas;
-        ctx.fillRect(cx, cy, grid.charWidth, grid.charHeight);
-
-        this.drawChar(ctx, cornerChar, curr.x, curr.y, grid, color);
-      }
-    }
+    const bgStyles = getComputedStyle(document.documentElement);
+    const bgCanvas = bgStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+    this.lineUtils.drawSegments(ctx, points, chars, grid, color, bgCanvas);
   }
 
   renderOverlay(ctx, context) {

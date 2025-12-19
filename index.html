@@ -25,6 +25,10 @@
       <span>Line</span>
       <kbd>L</kbd>
     </button>
+    <button class="tool-btn" data-tool="wire" title="Wire (W)">
+      <span>Wire</span>
+      <kbd>W</kbd>
+    </button>
     <button class="tool-btn" data-tool="symbol" title="Symbol (S)">
       <span>Symbol</span>
       <kbd>S</kbd>
@@ -113,6 +117,7 @@
   <script src="js/core/HistoryManager.js"></script>
   <script src="js/core/State.js"></script>
   <script src="js/core/HotkeyManager.js"></script>
+  <script src="js/core/lineUtils.js"></script>
 
   <!-- Tools (depends on core) -->
   <script src="js/tools/Tool.js"></script>
@@ -123,6 +128,7 @@
   <script src="js/tools/TextTool.js"></script>
   <script src="js/tools/SymbolTool.js"></script>
   <script src="js/tools/PinTool.js"></script>
+  <script src="js/tools/WireTool.js"></script>
 
   <!-- Rendering (depends on core) -->
   <script src="js/rendering/Renderer.js"></script>

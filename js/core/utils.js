@@ -220,6 +220,99 @@ AsciiEditor.core.computeJunctions = function(objects) {
 };
 
 /**
+ * OBJ-6A to OBJ-6D: Compute wire junctions and propagate net names
+ * A wire junction exists where 2+ wires share a point
+ * @param {Array} objects - array of objects on the page
+ * @returns {Array} array of wire-junction objects
+ */
+AsciiEditor.core.computeWireJunctions = function(objects) {
+  const wires = objects.filter(o => o.type === 'wire' && o.points && o.points.length >= 2);
+  const pointMap = new Map(); // "x,y" -> [{wireId, net, isEndpoint}]
+
+  AsciiEditor.debug.trace('WireJunction', 'Computing wire junctions', { wireCount: wires.length });
+
+  // FIRST PASS: Collect all vertices from all wires
+  for (const wire of wires) {
+    for (let i = 0; i < wire.points.length; i++) {
+      const pt = wire.points[i];
+      const key = `${pt.x},${pt.y}`;
+      const isEndpoint = (i === 0 || i === wire.points.length - 1);
+      if (!pointMap.has(key)) {
+        pointMap.set(key, []);
+      }
+      pointMap.get(key).push({ wireId: wire.id, net: wire.net || '', style: wire.style || 'single', isEndpoint });
+    }
+  }
+
+  // SECOND PASS: Check for T-junctions (vertices landing on other wires' segments)
+  for (const wire of wires) {
+    for (let i = 0; i < wire.points.length - 1; i++) {
+      const p1 = wire.points[i];
+      const p2 = wire.points[i + 1];
+
+      for (const otherWire of wires) {
+        if (otherWire.id === wire.id) continue;
+
+        for (const otherPt of otherWire.points) {
+          if ((otherPt.x === p1.x && otherPt.y === p1.y) ||
+              (otherPt.x === p2.x && otherPt.y === p2.y)) {
+            continue;
+          }
+          if (AsciiEditor.core.pointOnSegment(otherPt, p1, p2)) {
+            const key = `${otherPt.x},${otherPt.y}`;
+            const existing = pointMap.get(key);
+            if (existing && !existing.find(e => e.wireId === wire.id)) {
+              existing.push({ wireId: wire.id, net: wire.net || '', style: wire.style || 'single', isEndpoint: false });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Create wire junction objects where 2+ wires meet
+  const junctions = [];
+  for (const [key, wireRefs] of pointMap) {
+    if (wireRefs.length >= 2) {
+      const [x, y] = key.split(',').map(Number);
+      const connectedWires = [...new Set(wireRefs.map(r => r.wireId))];
+
+      if (connectedWires.length >= 2) {
+        // Wire junctions are created at ALL multi-wire connection points
+        // (unlike line junctions which skip shared endpoints)
+
+        // OBJ-6C: Propagate net name - use first non-empty net found
+        const netNames = wireRefs.map(r => r.net).filter(n => n && n.length > 0);
+        const net = netNames.length > 0 ? netNames[0] : '';
+
+        // Determine junction style
+        const styles = wireRefs.map(r => r.style);
+        let junctionStyle = 'single';
+        if (styles.includes('double')) junctionStyle = 'double';
+        if (styles.includes('thick')) junctionStyle = 'thick';
+
+        const junction = {
+          id: AsciiEditor.core.generateId(),
+          type: 'wire-junction',
+          x: x,
+          y: y,
+          connectedWires: connectedWires,
+          net: net,
+          style: junctionStyle,
+          derived: true,
+          selectable: false
+        };
+        junctions.push(junction);
+        AsciiEditor.debug.trace('WireJunction', 'Created wire junction', junction);
+      }
+    }
+  }
+
+  AsciiEditor.debug.trace('WireJunction', 'Wire junction computation complete', { junctionCount: junctions.length });
+  return junctions;
+};
+
+/**
  * Merge lines that share endpoints into single lines
  * @param {Array} objects - array of objects on the page
  * @returns {Array} array with merged lines (non-line objects unchanged)
@@ -308,24 +401,28 @@ AsciiEditor.core.mergeConnectedLines = function(objects) {
 AsciiEditor.core.recomputeJunctions = function(page) {
   AsciiEditor.debug.trace('Junction', 'recomputeJunctions called', { pageId: page.id, objectCount: page.objects.length });
 
-  // Remove existing junctions
-  const nonJunctionObjects = page.objects.filter(o => o.type !== 'junction');
+  // Remove existing junctions (both line and wire junctions)
+  const nonJunctionObjects = page.objects.filter(o => o.type !== 'junction' && o.type !== 'wire-junction');
 
   // First, merge lines that share endpoints
   const mergedObjects = AsciiEditor.core.mergeConnectedLines(nonJunctionObjects);
 
-  // Then compute junctions on merged lines
-  const newJunctions = AsciiEditor.core.computeJunctions(mergedObjects);
+  // Compute line junctions
+  const newLineJunctions = AsciiEditor.core.computeJunctions(mergedObjects);
+
+  // OBJ-6A to OBJ-6D: Compute wire junctions
+  const newWireJunctions = AsciiEditor.core.computeWireJunctions(mergedObjects);
 
   AsciiEditor.debug.trace('Junction', 'recomputeJunctions complete', {
     originalObjects: page.objects.length,
     afterMerge: mergedObjects.length,
-    newJunctions: newJunctions.length
+    lineJunctions: newLineJunctions.length,
+    wireJunctions: newWireJunctions.length
   });
 
-  // Return updated page
+  // Return updated page with all junctions
   return {
     ...page,
-    objects: [...mergedObjects, ...newJunctions]
+    objects: [...mergedObjects, ...newLineJunctions, ...newWireJunctions]
   };
 };

@@ -259,10 +259,25 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       const page = currentState.project.pages.find(p => p.id === currentState.activePageId);
       if (page) {
         this.originalPositions = {};
+        this.originalWireEndpoints = {}; // OBJ-69: Store original wire endpoints for rubberbanding
+
         this.draggedIds.forEach(id => {
           const obj = page.objects.find(o => o.id === id);
           if (obj) {
             this.originalPositions[id] = { x: obj.x, y: obj.y };
+
+            // OBJ-69: Store original wire endpoints for symbols
+            if (obj.type === 'symbol') {
+              const boundWires = this.findWiresBoundToSymbol(id, page.objects);
+              boundWires.forEach(wire => {
+                if (!this.originalWireEndpoints[wire.id]) {
+                  this.originalWireEndpoints[wire.id] = {
+                    start: wire.points[0] ? { x: wire.points[0].x, y: wire.points[0].y } : null,
+                    end: wire.points[wire.points.length - 1] ? { x: wire.points[wire.points.length - 1].x, y: wire.points[wire.points.length - 1].y } : null
+                  };
+                }
+              });
+            }
           }
         });
       }
@@ -299,6 +314,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
             if (obj && orig) {
               obj.x = orig.x + dx;
               obj.y = orig.y + dy;
+
+              // OBJ-69: Update bound wire endpoints when symbol moves
+              if (obj.type === 'symbol') {
+                this.updateBoundWireEndpoints(page, id, dx, dy);
+              }
             }
           });
         }
@@ -367,11 +387,12 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       const dy = row - this.dragStart.row;
 
       if (dx !== 0 || dy !== 0) {
-        // Restore original positions first
+        // Restore original positions first (including wire endpoints)
         context.history.updateState(state => {
           const newState = AsciiEditor.core.deepClone(state);
           const page = newState.project.pages.find(p => p.id === state.activePageId);
           if (page) {
+            // Restore object positions
             this.draggedIds.forEach(id => {
               const obj = page.objects.find(o => o.id === id);
               const orig = this.originalPositions[id];
@@ -380,12 +401,32 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
                 obj.y = orig.y;
               }
             });
+
+            // OBJ-69: Restore wire endpoints
+            if (this.originalWireEndpoints) {
+              for (const wireId in this.originalWireEndpoints) {
+                const wire = page.objects.find(o => o.id === wireId);
+                const orig = this.originalWireEndpoints[wireId];
+                if (wire && wire.points && orig) {
+                  if (orig.start) {
+                    wire.points[0].x = orig.start.x;
+                    wire.points[0].y = orig.start.y;
+                  }
+                  if (orig.end) {
+                    wire.points[wire.points.length - 1].x = orig.end.x;
+                    wire.points[wire.points.length - 1].y = orig.end.y;
+                  }
+                }
+              }
+            }
           }
           return newState;
         });
 
         // Execute move commands for undo/redo
         const state = context.history.getState();
+        const page = state.project.pages.find(p => p.id === state.activePageId);
+
         this.draggedIds.forEach(id => {
           const orig = this.originalPositions[id];
           if (orig) {
@@ -397,6 +438,56 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
             ));
           }
         });
+
+        // OBJ-69: Execute wire endpoint update commands for symbols
+        if (this.originalWireEndpoints && page) {
+          for (const wireId in this.originalWireEndpoints) {
+            const wire = page.objects.find(o => o.id === wireId);
+            const orig = this.originalWireEndpoints[wireId];
+            if (!wire || !wire.points || !orig) continue;
+
+            // Calculate new positions based on bound symbol positions
+            const newPoints = wire.points.map(p => ({ x: p.x, y: p.y }));
+            let needsUpdate = false;
+
+            // Check start binding
+            if (wire.startBinding && orig.start) {
+              const symbol = page.objects.find(o => o.id === wire.startBinding.symbolId);
+              if (symbol && symbol.pins) {
+                const pin = symbol.pins.find(p => p.id === wire.startBinding.pinId);
+                if (pin) {
+                  // Get current pin position (symbol has already been moved by MoveObjectCommand)
+                  const newPos = this.getPinPosition(symbol, pin);
+                  newPoints[0] = { x: newPos.x, y: newPos.y };
+                  needsUpdate = true;
+                }
+              }
+            }
+
+            // Check end binding
+            if (wire.endBinding && orig.end) {
+              const symbol = page.objects.find(o => o.id === wire.endBinding.symbolId);
+              if (symbol && symbol.pins) {
+                const pin = symbol.pins.find(p => p.id === wire.endBinding.pinId);
+                if (pin) {
+                  const newPos = this.getPinPosition(symbol, pin);
+                  newPoints[newPoints.length - 1] = { x: newPos.x, y: newPos.y };
+                  needsUpdate = true;
+                }
+              }
+            }
+
+            if (needsUpdate) {
+              const origPoints = wire.points.map(p => ({ x: p.x, y: p.y }));
+              context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+                state.activePageId,
+                wireId,
+                { points: origPoints },
+                { points: newPoints }
+              ));
+            }
+          }
+        }
       }
     }
 
@@ -624,7 +715,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (!page) return;
 
     const obj = page.objects.find(o => o.id === state.selection.ids[0]);
-    if (!obj || obj.type !== 'line' || !obj.points) return;
+    if (!obj || (obj.type !== 'line' && obj.type !== 'wire') || !obj.points) return;
 
     const idx = this.linePointIndex;
     const origPoints = this.lineOriginalPoints;
@@ -679,7 +770,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (!page) return;
 
     const obj = page.objects.find(o => o.id === state.selection.ids[0]);
-    if (!obj || obj.type !== 'line' || !obj.points) return;
+    if (!obj || (obj.type !== 'line' && obj.type !== 'wire') || !obj.points) return;
 
     const origPoints = this.lineOriginalPoints;
     // Simplify points to remove duplicates and collinear points
@@ -762,7 +853,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (!page) return;
 
     const obj = page.objects.find(o => o.id === state.selection.ids[0]);
-    if (!obj || obj.type !== 'line' || !obj.points) return;
+    if (!obj || (obj.type !== 'line' && obj.type !== 'wire') || !obj.points) return;
 
     const segIdx = this.lineSegmentIndex;
     const origPoints = this.lineOriginalPoints;
@@ -813,7 +904,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (!page) return;
 
     const obj = page.objects.find(o => o.id === state.selection.ids[0]);
-    if (!obj || obj.type !== 'line' || !obj.points) return;
+    if (!obj || (obj.type !== 'line' && obj.type !== 'wire') || !obj.points) return;
 
     const origPoints = this.lineOriginalPoints;
     // Simplify points to remove duplicates and collinear points
@@ -936,8 +1027,8 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     const handleSize = 8;
 
-    // Line handles (vertex and segment)
-    if (obj.type === 'line' && obj.points) {
+    // Line/Wire handles (vertex and segment)
+    if ((obj.type === 'line' || obj.type === 'wire') && obj.points) {
       // First check vertex handles (higher priority)
       for (let i = 0; i < obj.points.length; i++) {
         const point = obj.points[i];
@@ -1009,7 +1100,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   objectContainsPoint(obj, col, row) {
-    if (obj.type === 'line') {
+    if (obj.type === 'line' || obj.type === 'wire') {
       return this.lineContainsPoint(obj, col, row);
     }
     // Default: rectangular bounds (boxes, etc.)
@@ -1055,7 +1146,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
   // Get bounding box for any object (used for marquee selection)
   getObjectBounds(obj) {
-    if (obj.type === 'line') {
+    if (obj.type === 'line' || obj.type === 'wire') {
       return this.getLineBounds(obj);
     }
     // Default: box-like objects
@@ -1123,6 +1214,47 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         return { x: Math.floor(x + offset * (width - 1)), y: y + height - 1 };
       default:
         return { x: x, y: y };
+    }
+  }
+
+  // OBJ-69: Find all wires bound to a symbol
+  findWiresBoundToSymbol(symbolId, objects) {
+    return objects.filter(obj => {
+      if (obj.type !== 'wire') return false;
+      return (obj.startBinding?.symbolId === symbolId) ||
+             (obj.endBinding?.symbolId === symbolId);
+    });
+  }
+
+  // OBJ-69: Update wire endpoints based on pin positions after symbol move
+  updateBoundWireEndpoints(page, symbolId, dx, dy) {
+    const symbol = page.objects.find(o => o.id === symbolId);
+    if (!symbol || !symbol.pins) return;
+
+    const wires = this.findWiresBoundToSymbol(symbolId, page.objects);
+
+    for (const wire of wires) {
+      if (!wire.points || wire.points.length < 2) continue;
+
+      // Update start endpoint if bound to this symbol
+      if (wire.startBinding?.symbolId === symbolId) {
+        const pin = symbol.pins.find(p => p.id === wire.startBinding.pinId);
+        if (pin) {
+          const newPos = this.getPinPosition(symbol, pin);
+          wire.points[0].x = newPos.x;
+          wire.points[0].y = newPos.y;
+        }
+      }
+
+      // Update end endpoint if bound to this symbol
+      if (wire.endBinding?.symbolId === symbolId) {
+        const pin = symbol.pins.find(p => p.id === wire.endBinding.pinId);
+        if (pin) {
+          const newPos = this.getPinPosition(symbol, pin);
+          wire.points[wire.points.length - 1].x = newPos.x;
+          wire.points[wire.points.length - 1].y = newPos.y;
+        }
+      }
     }
   }
 
@@ -1525,8 +1657,8 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           const handleSize = 6;
           ctx.fillStyle = selectionStroke;
 
-          if (obj.type === 'line') {
-            // For lines, draw handles at each point
+          if (obj.type === 'line' || obj.type === 'wire') {
+            // For lines/wires, draw handles at each point
             this.drawLineHandles(ctx, obj, context);
           } else {
             // Corner handles for boxes
