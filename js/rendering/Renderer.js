@@ -218,6 +218,9 @@ AsciiEditor.rendering.Renderer = class Renderer {
       case 'box':
         this.drawBox(obj);
         break;
+      case 'symbol':
+        this.drawSymbol(obj);
+        break;
       case 'line':
         this.drawLine(obj);
         break;
@@ -230,6 +233,164 @@ AsciiEditor.rendering.Renderer = class Renderer {
       default:
         // Unknown type - log warning but don't render anything that might obscure content
         AsciiEditor.debug.warn('Renderer', 'Unknown object type', { type: obj.type, obj });
+    }
+  }
+
+  // OBJ-50 to OBJ-5J: Symbol rendering (box + designator + parameters + pins)
+  drawSymbol(obj) {
+    // Draw the box portion (reuse box rendering for border, fill, text)
+    this.drawBox(obj);
+
+    const styles = getComputedStyle(document.documentElement);
+    const color = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
+    const accentColor = styles.getPropertyValue('--accent').trim() || '#007acc';
+
+    // Draw designator if visible
+    if (obj.designator && obj.designator.visible) {
+      const desig = obj.designator;
+      const designatorText = `${desig.prefix}${desig.number}`;
+      const desigX = obj.x + (desig.offset?.x || 0);
+      const desigY = obj.y + (desig.offset?.y || -1);
+      this.drawText(designatorText, desigX, desigY, accentColor);
+    }
+
+    // Draw visible parameters
+    if (obj.parameters && obj.parameters.length > 0) {
+      obj.parameters.forEach(param => {
+        if (param.visible && param.value) {
+          const paramX = obj.x + (param.offset?.x || 0);
+          const paramY = obj.y + (param.offset?.y || obj.height);
+          this.drawText(param.value, paramX, paramY, color);
+        }
+      });
+    }
+
+    // Draw pins on edges
+    if (obj.pins && obj.pins.length > 0) {
+      this.drawSymbolPins(obj);
+    }
+  }
+
+  // Draw pins on symbol edges
+  drawSymbolPins(obj) {
+    const styles = getComputedStyle(document.documentElement);
+    const pinColor = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
+    const pinNameColor = styles.getPropertyValue('--text-dim').trim() || '#888888';
+
+    // Pin shape characters (same as line end caps)
+    const pinShapes = {
+      'circle': '●',
+      'circle-outline': '○',
+      'square': '■',
+      'square-outline': '□',
+      'diamond': '◆',
+      'diamond-outline': '◇',
+      'triangle': '▶',
+      'triangle-outline': '▷'
+    };
+
+    obj.pins.forEach(pin => {
+      const pos = this.getPinWorldPosition(obj, pin);
+      const char = pinShapes[pin.shape] || pinShapes['circle-outline'];
+
+      // Clear the cell first to remove the box edge character
+      const px = pos.x * this.grid.charWidth;
+      const py = pos.y * this.grid.charHeight;
+      const bgCanvas = styles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+      this.ctx.fillStyle = bgCanvas;
+      this.ctx.fillRect(px, py, this.grid.charWidth, this.grid.charHeight);
+
+      // Draw the pin character
+      this.drawChar(char, pos.x, pos.y, pinColor);
+
+      // OBJ-5O to OBJ-5R: Render pin name toward interior of symbol
+      if (pin.name && pin.name.length > 0) {
+        this.drawPinName(obj, pin, pos, pinNameColor);
+      }
+    });
+  }
+
+  // OBJ-5O to OBJ-5R: Draw pin name inside the symbol box
+  drawPinName(symbol, pin, pinPos, color) {
+    const name = pin.name;
+    if (!name) return;
+
+    const { x, y, width, height } = symbol;
+
+    switch (pin.edge) {
+      case 'left':
+        // OBJ-5O: Left edge - name starts 1 cell right of pin (inside symbol)
+        // Text reads left-to-right, starting just inside the border
+        for (let i = 0; i < name.length; i++) {
+          const nameX = pinPos.x + 1 + i;
+          // Don't draw outside symbol interior
+          if (nameX < x + width - 1) {
+            this.drawChar(name[i], nameX, pinPos.y, color);
+          }
+        }
+        break;
+
+      case 'right':
+        // OBJ-5P: Right edge - name ends 1 cell left of pin (inside symbol)
+        // Text reads left-to-right, ending just inside the border
+        const startX = pinPos.x - name.length;
+        for (let i = 0; i < name.length; i++) {
+          const nameX = startX + i;
+          // Don't draw outside symbol interior
+          if (nameX > x) {
+            this.drawChar(name[i], nameX, pinPos.y, color);
+          }
+        }
+        break;
+
+      case 'top':
+        // OBJ-5Q: Top edge - name centered horizontally, 1 row below pin (inside symbol)
+        // Text reads left-to-right
+        const topCenterX = pinPos.x - Math.floor(name.length / 2);
+        for (let i = 0; i < name.length; i++) {
+          const nameX = topCenterX + i;
+          // Stay within symbol bounds horizontally
+          if (nameX > x && nameX < x + width - 1) {
+            this.drawChar(name[i], nameX, pinPos.y + 1, color);
+          }
+        }
+        break;
+
+      case 'bottom':
+        // OBJ-5R: Bottom edge - name centered horizontally, 1 row above pin (inside symbol)
+        // Text reads left-to-right
+        const bottomCenterX = pinPos.x - Math.floor(name.length / 2);
+        for (let i = 0; i < name.length; i++) {
+          const nameX = bottomCenterX + i;
+          // Stay within symbol bounds horizontally
+          if (nameX > x && nameX < x + width - 1) {
+            this.drawChar(name[i], nameX, pinPos.y - 1, color);
+          }
+        }
+        break;
+    }
+  }
+
+  // Calculate world position of a pin (ON the symbol border)
+  getPinWorldPosition(symbol, pin) {
+    const { x, y, width, height } = symbol;
+    const offset = pin.offset || 0.5;
+
+    switch (pin.edge) {
+      case 'left':
+        // Left edge: x stays at symbol left, y varies along height
+        return { x: x, y: Math.floor(y + offset * (height - 1)) };
+      case 'right':
+        // Right edge: x at symbol right border, y varies along height
+        return { x: x + width - 1, y: Math.floor(y + offset * (height - 1)) };
+      case 'top':
+        // Top edge: y at symbol top, x varies along width
+        return { x: Math.floor(x + offset * (width - 1)), y: y };
+      case 'bottom':
+        // Bottom edge: y at symbol bottom border, x varies along width
+        return { x: Math.floor(x + offset * (width - 1)), y: y + height - 1 };
+      default:
+        return { x: x, y: y };
     }
   }
 
@@ -441,7 +602,7 @@ AsciiEditor.rendering.Renderer = class Renderer {
 
   // SEL-33: Blinking cursor for inline editing
   drawEditCursor(obj, cursorPos) {
-    if (!obj || obj.type !== 'box') return;
+    if (!obj || (obj.type !== 'box' && obj.type !== 'symbol')) return;
 
     // For borderless boxes (style: 'none'), use full dimensions
     const hasBorder = obj.style && obj.style !== 'none';

@@ -66,20 +66,20 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 | [x] | **TOOL-21** | TextBoxTool | B | Create text box with border (default: single) |
 | [x] | **TOOL-22** | TextTool | T | Create text box without border (style: none) |
 | [x] | **TOOL-23** | LineTool | L | Create lines and connectors |
-| [ ] | **TOOL-24** | SymbolTool | S | Create pin/node boxes (schematic symbols) |
+| [~] | **TOOL-24** | SymbolTool | S | Create pin/node boxes (schematic symbols) |
 | [ ] | **TOOL-25** | WireTool | W | Create wires with net labels |
 | [ ] | **TOOL-26** | PortTool | P | Create off-page connection ports |
 | [ ] | **TOOL-27** | PowerTool | O | Create power symbols (VCC, GND) |
-| [ ] | **TOOL-28** | PinTool | I | Add pins to symbols |
+| [~] | **TOOL-28** | PinTool | I | Add pins to symbols |
 | [ ] | **TOOL-29** | DeleteTool | X | Delete objects and segments |
 
 ### Pin Tool (TOOL-28)
 
-- [ ] **TOOL-28A**: Shows pin shape preview at cursor (●, ○, ■, □, etc.)
-- [ ] **TOOL-28B**: Cycle shape with number keys (like line styles)
-- [ ] **TOOL-28C**: Hover over symbol edge → shows "PIN" hint indicator
-- [ ] **TOOL-28D**: Click on symbol edge → creates pin at that position
-- [ ] **TOOL-28E**: Click elsewhere → no action (pin only valid on symbol edge)
+- [~] **TOOL-28A**: Shows pin shape preview at cursor (●, ○, ■, □, etc.)
+- [~] **TOOL-28B**: Cycle shape with number keys (like line styles)
+- [~] **TOOL-28C**: Hover over symbol edge → shows "PIN" hint indicator
+- [~] **TOOL-28D**: Click on symbol edge → creates pin at that position
+- [~] **TOOL-28E**: Click elsewhere → no action (pin only valid on symbol edge)
 - [ ] **TOOL-28F**: Pins auto-created when wire starts/ends on symbol edge (via WireTool)
 
 ### Delete Tool (TOOL-29)
@@ -218,33 +218,47 @@ Symbols are schematic components with pins for connectivity. They support inline
 
 #### Symbol Base Properties
 
-- [ ] **OBJ-50**: Box-like container with width, height, position
-- [ ] **OBJ-51**: Pins array embedded within symbol (move with symbol)
-- [ ] **OBJ-52**: Quick ad-hoc entry - no library required (PHIL-10)
-- [ ] **OBJ-53**: Pins can be added/removed inline (PHIL-11)
+- [~] **OBJ-50**: Box-like container with width, height, position
+- [~] **OBJ-51**: Pins array embedded within symbol (move with symbol)
+- [~] **OBJ-52**: Quick ad-hoc entry - no library required (PHIL-10)
+- [~] **OBJ-53**: Pins can be added/removed inline (PHIL-11)
 
 #### Symbol Box Properties (inherited from TextBox)
 
-- [ ] **OBJ-50A**: Border styles: single, double, thick, none (same as box)
-- [ ] **OBJ-50B**: Optional drop shadow using ░ character
-- [ ] **OBJ-50C**: Text content with 9-position justification
-- [ ] **OBJ-50D**: Optional fill property (none, light, medium, dark, solid, dots)
+- [~] **OBJ-50A**: Border styles: single, double, thick, none (same as box)
+- [~] **OBJ-50B**: Optional drop shadow using ░ character
+- [~] **OBJ-50C**: Text content with 9-position justification
+- [~] **OBJ-50D**: Optional fill property (none, light, medium, dark, solid, dots)
 
 #### Designator (Reference)
 
-- [ ] **OBJ-54**: Designator with prefix + number (U1, R1, IC3)
-- [ ] **OBJ-55**: Auto-increment number per prefix on creation
-- [ ] **OBJ-56**: Designator offset: relative position to symbol (default: 1 cell above, left-aligned)
+- [~] **OBJ-54**: Designator with prefix + number (U1, R1, IC3)
+- [~] **OBJ-55**: Auto-increment number per prefix on creation
+- [~] **OBJ-56**: Designator offset: relative position to symbol (default: 1 cell above, left-aligned)
 - [ ] **OBJ-57**: Designator repositionable - can be moved anywhere relative to symbol
-- [ ] **OBJ-58**: Designator visible flag (can be hidden)
+- [~] **OBJ-58**: Designator visible flag (can be hidden)
 - [ ] **OBJ-59**: Copy symbol → auto-assigns next available number for prefix
+- [ ] **OBJ-5A0**: Designator rendered as ASCII text on canvas (not just in properties panel)
+
+#### Designator/Value Selection & Movement
+
+Designators and parameter values (e.g., "value") are selectable sub-elements of a symbol. When selected, they can be dragged to reposition relative to the parent symbol.
+
+- [ ] **OBJ-5A1**: Designator is click-selectable as a sub-element of symbol
+- [ ] **OBJ-5A2**: Value parameter is click-selectable as a sub-element of symbol
+- [ ] **OBJ-5A3**: Selected designator/value shows selection highlight
+- [ ] **OBJ-5A4**: Dragging designator/value updates its offset (relative to symbol origin)
+- [ ] **OBJ-5A5**: Offset stored as { x, y } relative to symbol position
+- [ ] **OBJ-5A6**: When designator/value selected, show dashed leader line from symbol to label
+- [ ] **OBJ-5A7**: Leader line helps identify parent when label is positioned far from symbol
+- [ ] **OBJ-5A8**: Properties panel shows designator/value properties when sub-element selected
 
 #### Parameters (Value, etc.)
 
-- [ ] **OBJ-5A**: Parameters array: name, value, offset, visible
-- [ ] **OBJ-5B**: Common parameters: value (10k, LM358), footprint (SOIC-8)
+- [~] **OBJ-5A**: Parameters array: name, value, offset, visible
+- [~] **OBJ-5B**: Common parameters: value (10k, LM358), footprint (SOIC-8)
 - [ ] **OBJ-5C**: Parameters repositionable like designator
-- [ ] **OBJ-5D**: Parameters visible flag (can be hidden)
+- [~] **OBJ-5D**: Parameters visible flag (can be hidden)
 
 #### Symbol Data Structure
 
@@ -271,16 +285,44 @@ Symbols are schematic components with pins for connectivity. They support inline
 }
 ```
 
+#### Symbol Internal Render Order
+
+Within a single symbol, elements are drawn in a specific order to ensure proper layering. Later elements overwrite earlier ones at the same cell position.
+
+| Order | ID | Element | Description |
+|-------|-----|---------|-------------|
+| 1 | **SYM-R1** | Border | Box-drawing characters for symbol outline |
+| 2 | **SYM-R2** | Fill | Interior fill characters (if any) |
+| 3 | **SYM-R3** | Pins | Pin characters on border (overwrite border chars) |
+| 4 | **SYM-R4** | Pin Names | Pin name text inside symbol |
+| 5 | **SYM-R5** | Internal Text | Symbol text content (center text) |
+| 6 | **SYM-R6** | Designator | Reference designator (U1, R1) - can be inside or outside |
+| 7 | **SYM-R7** | Parameters | Value and other parameters - can be inside or outside |
+
+- [ ] **SYM-R10**: Designator/value rendered on top of fill when positioned inside symbol
+- [ ] **SYM-R11**: Designator/value can be positioned outside symbol bounds
+- [ ] **SYM-R12**: Pin names rendered after fill so they're visible on filled symbols
+
 ### Pin Object (Child of Symbol)
 
 Pins are single-character markers on symbol edges for wire connectivity. They reuse the same visual vocabulary as line end caps.
 
-- [ ] **OBJ-5E**: Pin is child of symbol, stored in symbol's pins array
-- [ ] **OBJ-5F**: Pin position: edge (left/right/top/bottom) + offset (0-1 along edge)
-- [ ] **OBJ-5G**: Pin shape: same as line caps (circle, circle-outline, square, square-outline, diamond, diamond-outline, triangle variants)
-- [ ] **OBJ-5H**: Pin properties: id, name, direction (input/output/bidirectional)
-- [ ] **OBJ-5I**: Pin world position computed from symbol position + edge + offset
-- [ ] **OBJ-5J**: Pins snap to character grid positions along edge
+- [~] **OBJ-5E**: Pin is child of symbol, stored in symbol's pins array
+- [~] **OBJ-5F**: Pin position: edge (left/right/top/bottom) + offset (0-1 along edge)
+- [~] **OBJ-5G**: Pin shape: same as line caps (circle, circle-outline, square, square-outline, diamond, diamond-outline, triangle variants)
+- [~] **OBJ-5H**: Pin properties: id, name, direction (input/output/bidirectional)
+- [~] **OBJ-5I**: Pin world position computed from symbol position + edge + offset
+- [~] **OBJ-5J**: Pins snap to character grid positions along edge
+- [ ] **OBJ-5J2**: Pins CANNOT be placed on corner cells (corners reserved for box-drawing characters)
+- [~] **OBJ-5K**: Pin character drawn ON the symbol border (replaces border char at that position)
+- [~] **OBJ-5L**: Pins are selectable and can be repositioned along symbol edges
+- [~] **OBJ-5M**: Dragging a pin constrains movement to symbol edges only
+- [~] **OBJ-5N**: Pin properties panel with name field when pin is selected
+- [~] **OBJ-5O**: Pin name renders toward interior of symbol box
+- [~] **OBJ-5P**: Left edge pins: name right-aligned inside, starting after pin
+- [~] **OBJ-5Q**: Right edge pins: name left-aligned inside, ending before pin cell
+- [~] **OBJ-5R**: Top/bottom edge pins: name centered inside, vertically below/above pin
+- [~] **OBJ-5S**: Symbol resize maintains pin positions on edges (pins move with edge)
 
 #### Pin Data Structure
 
@@ -663,6 +705,46 @@ Generate connectivity data from schematic elements (symbols with pins, wires, ju
 - [x] **VIS-30**: Dark background (#1a1a1a)
 - [x] **VIS-31**: Grid overlay (toggleable)
 - [x] **VIS-32**: Selection highlight with accent color
+
+### Render Layers & Precedence
+
+Defines the order in which elements are drawn. Higher layers overwrite lower layers at the same cell position. This ensures predictable visual results when elements overlap.
+
+**Key principle**: Lines/wires are drawn UNDER boxes/symbols. This allows lines to visually connect to symbols without obscuring symbol content.
+
+| Status | ID | Layer | Priority | Elements | Description |
+|--------|-----|-------|----------|----------|-------------|
+| [x] | **VIS-40** | Grid | 0 | Grid lines | Background grid overlay |
+| [ ] | **VIS-41** | Line | 10 | Line segments | Horizontal/vertical line characters |
+| [ ] | **VIS-42** | LineCorner | 15 | Line corners | Corner characters at line bends |
+| [ ] | **VIS-43** | LineCap | 18 | Line end caps | Arrow/shape at line endpoints |
+| [ ] | **VIS-44** | LineJunction | 20 | Line junctions | Visual connection markers on lines |
+| [ ] | **VIS-45** | BoxFill | 30 | Box fill | Box interior fill characters |
+| [ ] | **VIS-46** | BoxBorder | 35 | Box border | Box edge characters (─│┌┐└┘) |
+| [ ] | **VIS-47** | SymbolFill | 40 | Symbol fill | Symbol interior fill characters |
+| [ ] | **VIS-48** | SymbolBorder | 45 | Symbol border | Symbol edge characters |
+| [ ] | **VIS-49** | Pin | 50 | Symbol pins | Pin characters (overwrite symbol border) |
+| [ ] | **VIS-4B** | PinName | 55 | Pin names | Pin name text inside symbol |
+| [ ] | **VIS-4C** | Text | 60 | Box text, symbol text | Text content inside objects |
+| [ ] | **VIS-4D** | Label | 70 | Designators, parameters, net labels | Annotation text (can be inside or outside) |
+| [ ] | **VIS-4E** | WireJunction | 75 | Wire junctions | Electrical connection markers |
+| [x] | **VIS-4A** | Overlay | 100 | Tool previews, selection | Interactive overlays |
+
+#### Render Precedence Rules
+
+- [ ] **VIS-50**: Multi-pass rendering: each layer rendered in separate pass
+- [ ] **VIS-51**: Higher priority elements clear cell before drawing (overwrite lower)
+- [ ] **VIS-52**: Elements at same priority: later in object array wins
+- [ ] **VIS-53**: Tool overlays always on top (non-destructive canvas overlay)
+- [ ] **VIS-54**: Lines render BEFORE (under) boxes and symbols
+- [ ] **VIS-55**: Symbols render on top of lines, allowing clean visual connections
+
+#### Implementation Approach
+
+- [ ] **VIS-60**: `RenderLayer` enum defines layer priorities
+- [ ] **VIS-61**: `Renderer.render()` iterates layers in priority order
+- [ ] **VIS-62**: Each object type maps to one or more layers
+- [ ] **VIS-63**: Cell clearing handled automatically by layer system
 
 ---
 

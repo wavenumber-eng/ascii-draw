@@ -119,6 +119,8 @@ AsciiEditor.Editor = class Editor {
     this.toolManager.register(new AsciiEditor.tools.BoxTool());
     this.toolManager.register(new AsciiEditor.tools.LineTool());
     this.toolManager.register(new AsciiEditor.tools.TextTool());
+    this.toolManager.register(new AsciiEditor.tools.SymbolTool());
+    this.toolManager.register(new AsciiEditor.tools.PinTool());
 
     // Set context
     this.toolManager.setContext({
@@ -147,6 +149,7 @@ AsciiEditor.Editor = class Editor {
     hk.register('t', () => this.setTool('text'));
     hk.register('l', () => this.setTool('line'));
     hk.register('s', () => this.setTool('symbol'));
+    hk.register('i', () => this.setTool('pin'));
     hk.register('w', () => this.setTool('wire'));
     hk.register('p', () => this.setTool('port'));
     hk.register('o', () => this.setTool('power'));
@@ -278,7 +281,7 @@ AsciiEditor.Editor = class Editor {
   // ============================================================
 
   startInlineEdit(obj, initialChar = null) {
-    if (!obj || obj.type !== 'box') return;
+    if (!obj || (obj.type !== 'box' && obj.type !== 'symbol')) return;
 
     const state = this.history.getState();
     const page = state.project.pages.find(p => p.id === state.activePageId);
@@ -382,8 +385,20 @@ AsciiEditor.Editor = class Editor {
 
     if (selectedObjects.length === 1) {
       const obj = selectedObjects[0];
+
+      // Check if a specific pin is selected (OBJ-5N)
+      if (obj.type === 'symbol' && state.selection.pinId) {
+        const pin = (obj.pins || []).find(p => p.id === state.selection.pinId);
+        if (pin) {
+          this.renderPinProperties(obj, pin);
+          return;
+        }
+      }
+
       if (obj.type === 'box') {
         this.renderBoxProperties(obj);
+      } else if (obj.type === 'symbol') {
+        this.renderSymbolProperties(obj);
       } else if (obj.type === 'line') {
         this.renderLineProperties(obj);
       } else {
@@ -826,6 +841,424 @@ AsciiEditor.Editor = class Editor {
         this.updateObjectProperty(obj.id, 'text', textArea.value);
       });
     }
+  }
+
+  // Symbol properties panel (OBJ-50 to OBJ-5D)
+  renderSymbolProperties(obj) {
+    const content = document.getElementById('properties-content');
+    const justify = obj.textJustify || 'center-center';
+    const hasBorder = obj.style && obj.style !== 'none';
+    const minSize = hasBorder ? 3 : 1;
+    const desig = obj.designator || { prefix: 'U', number: 1, visible: true, offset: { x: 0, y: -1 } };
+    const valueParam = (obj.parameters || []).find(p => p.name === 'value') || { value: '', visible: true };
+
+    content.innerHTML = `
+      <div class="property-group">
+        <div class="property-group-title">Designator</div>
+        <div class="property-row">
+          <span class="property-label">Prefix</span>
+          <input type="text" class="property-input" id="prop-desig-prefix" value="${desig.prefix}" style="width: 50px;">
+        </div>
+        <div class="property-row">
+          <span class="property-label">Number</span>
+          <input type="number" class="property-input" id="prop-desig-number" value="${desig.number}" min="1" style="width: 60px;">
+        </div>
+        <div class="property-row">
+          <label class="property-checkbox">
+            <input type="checkbox" id="prop-desig-visible" ${desig.visible ? 'checked' : ''}>
+            <span>Show Designator</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Value</div>
+        <div class="property-row">
+          <input type="text" class="property-input" id="prop-value" value="${valueParam.value}" placeholder="e.g., LM358, 10k">
+        </div>
+        <div class="property-row">
+          <label class="property-checkbox">
+            <input type="checkbox" id="prop-value-visible" ${valueParam.visible ? 'checked' : ''}>
+            <span>Show Value</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Position</div>
+        <div class="property-row">
+          <span class="property-label">X</span>
+          <input type="number" class="property-input" id="prop-x" value="${obj.x}">
+        </div>
+        <div class="property-row">
+          <span class="property-label">Y</span>
+          <input type="number" class="property-input" id="prop-y" value="${obj.y}">
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Size</div>
+        <div class="property-row">
+          <span class="property-label">Width</span>
+          <input type="number" class="property-input" id="prop-width" value="${obj.width}" min="${minSize}">
+        </div>
+        <div class="property-row">
+          <span class="property-label">Height</span>
+          <input type="number" class="property-input" id="prop-height" value="${obj.height}" min="${minSize}">
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Style</div>
+        <div class="property-row">
+          <span class="property-label">Border</span>
+          <select class="property-select" id="prop-style">
+            <option value="single" ${obj.style === 'single' ? 'selected' : ''}>Single</option>
+            <option value="double" ${obj.style === 'double' ? 'selected' : ''}>Double</option>
+            <option value="thick" ${obj.style === 'thick' ? 'selected' : ''}>Thick</option>
+            <option value="none" ${obj.style === 'none' ? 'selected' : ''}>None</option>
+          </select>
+        </div>
+        <div class="property-row">
+          <label class="property-checkbox">
+            <input type="checkbox" id="prop-shadow" ${obj.shadow ? 'checked' : ''}>
+            <span>Drop Shadow</span>
+          </label>
+        </div>
+        <div class="property-row">
+          <span class="property-label">Fill</span>
+          <select class="property-select" id="prop-fill">
+            <option value="none" ${(obj.fill || 'none') === 'none' ? 'selected' : ''}>None</option>
+            <option value="light" ${obj.fill === 'light' ? 'selected' : ''}>░ Light</option>
+            <option value="medium" ${obj.fill === 'medium' ? 'selected' : ''}>▒ Medium</option>
+            <option value="dark" ${obj.fill === 'dark' ? 'selected' : ''}>▓ Dark</option>
+            <option value="solid" ${obj.fill === 'solid' ? 'selected' : ''}>█ Solid</option>
+            <option value="dots" ${obj.fill === 'dots' ? 'selected' : ''}>· Dots</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Text Content</div>
+        <div class="property-row">
+          <span class="property-label">Justify</span>
+        </div>
+        <div class="justify-grid" id="justify-grid">
+          <button class="justify-btn ${justify === 'top-left' ? 'active' : ''}" data-justify="top-left" title="Top Left">&#x2196;</button>
+          <button class="justify-btn ${justify === 'top-center' ? 'active' : ''}" data-justify="top-center" title="Top Center">&#x2191;</button>
+          <button class="justify-btn ${justify === 'top-right' ? 'active' : ''}" data-justify="top-right" title="Top Right">&#x2197;</button>
+          <button class="justify-btn ${justify === 'center-left' ? 'active' : ''}" data-justify="center-left" title="Center Left">&#x2190;</button>
+          <button class="justify-btn ${justify === 'center-center' ? 'active' : ''}" data-justify="center-center" title="Center">&#x25CF;</button>
+          <button class="justify-btn ${justify === 'center-right' ? 'active' : ''}" data-justify="center-right" title="Center Right">&#x2192;</button>
+          <button class="justify-btn ${justify === 'bottom-left' ? 'active' : ''}" data-justify="bottom-left" title="Bottom Left">&#x2199;</button>
+          <button class="justify-btn ${justify === 'bottom-center' ? 'active' : ''}" data-justify="bottom-center" title="Bottom Center">&#x2193;</button>
+          <button class="justify-btn ${justify === 'bottom-right' ? 'active' : ''}" data-justify="bottom-right" title="Bottom Right">&#x2198;</button>
+        </div>
+        <textarea class="property-textarea" id="prop-text" placeholder="Type when selected or double-click to edit">${obj.text || ''}</textarea>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Pins</div>
+        <div class="property-row">
+          <span style="color: var(--text-dim);">${(obj.pins || []).length} pin(s) - Use Pin Tool (I) to add</span>
+        </div>
+      </div>
+    `;
+
+    this.wireSymbolPropertyListeners(obj);
+  }
+
+  wireSymbolPropertyListeners(obj) {
+    // Position and size
+    ['x', 'y', 'width', 'height'].forEach(prop => {
+      const input = document.getElementById(`prop-${prop}`);
+      if (input) {
+        input.addEventListener('change', () => {
+          let value = parseInt(input.value, 10);
+          if (prop === 'width' || prop === 'height') {
+            value = Math.max(3, value);
+          }
+          this.updateObjectProperty(obj.id, prop, value);
+        });
+      }
+    });
+
+    // Designator
+    const desigPrefix = document.getElementById('prop-desig-prefix');
+    if (desigPrefix) {
+      desigPrefix.addEventListener('change', () => {
+        const desig = { ...obj.designator, prefix: desigPrefix.value.toUpperCase() };
+        this.updateObjectProperty(obj.id, 'designator', desig);
+      });
+    }
+
+    const desigNumber = document.getElementById('prop-desig-number');
+    if (desigNumber) {
+      desigNumber.addEventListener('change', () => {
+        const desig = { ...obj.designator, number: parseInt(desigNumber.value, 10) || 1 };
+        this.updateObjectProperty(obj.id, 'designator', desig);
+      });
+    }
+
+    const desigVisible = document.getElementById('prop-desig-visible');
+    if (desigVisible) {
+      desigVisible.addEventListener('change', () => {
+        const desig = { ...obj.designator, visible: desigVisible.checked };
+        this.updateObjectProperty(obj.id, 'designator', desig);
+      });
+    }
+
+    // Value parameter
+    const valueInput = document.getElementById('prop-value');
+    if (valueInput) {
+      valueInput.addEventListener('change', () => {
+        const params = [...(obj.parameters || [])];
+        const idx = params.findIndex(p => p.name === 'value');
+        if (idx >= 0) {
+          params[idx] = { ...params[idx], value: valueInput.value };
+        } else {
+          params.push({ name: 'value', value: valueInput.value, offset: { x: 0, y: obj.height }, visible: true });
+        }
+        this.updateObjectProperty(obj.id, 'parameters', params);
+      });
+    }
+
+    const valueVisible = document.getElementById('prop-value-visible');
+    if (valueVisible) {
+      valueVisible.addEventListener('change', () => {
+        const params = [...(obj.parameters || [])];
+        const idx = params.findIndex(p => p.name === 'value');
+        if (idx >= 0) {
+          params[idx] = { ...params[idx], visible: valueVisible.checked };
+          this.updateObjectProperty(obj.id, 'parameters', params);
+        }
+      });
+    }
+
+    // Style
+    const styleSelect = document.getElementById('prop-style');
+    if (styleSelect) {
+      styleSelect.addEventListener('change', () => {
+        this.updateObjectProperty(obj.id, 'style', styleSelect.value);
+      });
+    }
+
+    const shadowCheck = document.getElementById('prop-shadow');
+    if (shadowCheck) {
+      shadowCheck.addEventListener('change', () => {
+        this.updateObjectProperty(obj.id, 'shadow', shadowCheck.checked);
+      });
+    }
+
+    const fillSelect = document.getElementById('prop-fill');
+    if (fillSelect) {
+      fillSelect.addEventListener('change', () => {
+        this.updateObjectProperty(obj.id, 'fill', fillSelect.value);
+      });
+    }
+
+    // Justify
+    const justifyGrid = document.getElementById('justify-grid');
+    if (justifyGrid) {
+      justifyGrid.querySelectorAll('.justify-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          justifyGrid.querySelectorAll('.justify-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          this.updateObjectProperty(obj.id, 'textJustify', btn.dataset.justify);
+        });
+      });
+    }
+
+    const textArea = document.getElementById('prop-text');
+    if (textArea) {
+      textArea.addEventListener('input', () => {
+        this.updateObjectProperty(obj.id, 'text', textArea.value);
+      });
+    }
+  }
+
+  // OBJ-5N: Pin properties panel (shown when a pin is selected)
+  renderPinProperties(symbol, pin) {
+    const content = document.getElementById('properties-content');
+    const pinPos = this.getPinWorldPosition(symbol, pin);
+
+    // Get shape info
+    const pinShapes = AsciiEditor.tools.PinShapes || [];
+    const shapeOptions = pinShapes.map(s =>
+      `<option value="${s.key}" ${pin.shape === s.key ? 'selected' : ''}>${s.char} ${s.name}</option>`
+    ).join('');
+
+    content.innerHTML = `
+      <div class="property-group">
+        <div class="property-group-title">Pin Properties</div>
+        <div class="property-row">
+          <span class="property-label">Name</span>
+          <input type="text" class="property-input" id="prop-pin-name" value="${pin.name || ''}" placeholder="Pin name">
+        </div>
+        <div class="property-row">
+          <span class="property-label">Shape</span>
+          <select class="property-select" id="prop-pin-shape">
+            ${shapeOptions}
+          </select>
+        </div>
+        <div class="property-row">
+          <span class="property-label">Direction</span>
+          <select class="property-select" id="prop-pin-direction">
+            <option value="input" ${pin.direction === 'input' ? 'selected' : ''}>Input</option>
+            <option value="output" ${pin.direction === 'output' ? 'selected' : ''}>Output</option>
+            <option value="bidirectional" ${pin.direction === 'bidirectional' || !pin.direction ? 'selected' : ''}>Bidirectional</option>
+            <option value="power" ${pin.direction === 'power' ? 'selected' : ''}>Power</option>
+            <option value="passive" ${pin.direction === 'passive' ? 'selected' : ''}>Passive</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Position</div>
+        <div class="property-row">
+          <span class="property-label">Edge</span>
+          <span class="property-value">${pin.edge}</span>
+        </div>
+        <div class="property-row">
+          <span class="property-label">Location</span>
+          <span class="property-value">(${pinPos.x}, ${pinPos.y})</span>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <div class="property-group-title">Parent Symbol</div>
+        <div class="property-row">
+          <span class="property-label">Designator</span>
+          <span class="property-value">${symbol.designator ? symbol.designator.prefix + symbol.designator.number : 'N/A'}</span>
+        </div>
+        <div class="property-row">
+          <button class="property-btn" id="btn-select-symbol">Select Symbol</button>
+          <button class="property-btn danger" id="btn-delete-pin">Delete Pin</button>
+        </div>
+      </div>
+    `;
+
+    this.wirePinPropertyListeners(symbol, pin);
+  }
+
+  // Calculate pin world position (same logic as Renderer)
+  getPinWorldPosition(symbol, pin) {
+    const { x, y, width, height } = symbol;
+    const offset = pin.offset || 0.5;
+
+    switch (pin.edge) {
+      case 'left':
+        return { x: x, y: Math.floor(y + offset * (height - 1)) };
+      case 'right':
+        return { x: x + width - 1, y: Math.floor(y + offset * (height - 1)) };
+      case 'top':
+        return { x: Math.floor(x + offset * (width - 1)), y: y };
+      case 'bottom':
+        return { x: Math.floor(x + offset * (width - 1)), y: y + height - 1 };
+      default:
+        return { x: x, y: y };
+    }
+  }
+
+  wirePinPropertyListeners(symbol, pin) {
+    const state = this.history.getState();
+
+    // Pin name
+    const nameInput = document.getElementById('prop-pin-name');
+    if (nameInput) {
+      nameInput.addEventListener('change', () => {
+        this.updatePinProperty(symbol.id, pin.id, 'name', nameInput.value);
+      });
+    }
+
+    // Pin shape
+    const shapeSelect = document.getElementById('prop-pin-shape');
+    if (shapeSelect) {
+      shapeSelect.addEventListener('change', () => {
+        this.updatePinProperty(symbol.id, pin.id, 'shape', shapeSelect.value);
+      });
+    }
+
+    // Pin direction
+    const directionSelect = document.getElementById('prop-pin-direction');
+    if (directionSelect) {
+      directionSelect.addEventListener('change', () => {
+        this.updatePinProperty(symbol.id, pin.id, 'direction', directionSelect.value);
+      });
+    }
+
+    // Select Symbol button
+    const selectSymbolBtn = document.getElementById('btn-select-symbol');
+    if (selectSymbolBtn) {
+      selectSymbolBtn.addEventListener('click', () => {
+        // Clear pin selection, keep symbol selected
+        this.history.updateState(s => ({
+          ...s,
+          selection: { ids: [symbol.id], handles: null, pinId: null }
+        }));
+      });
+    }
+
+    // Delete Pin button
+    const deletePinBtn = document.getElementById('btn-delete-pin');
+    if (deletePinBtn) {
+      deletePinBtn.addEventListener('click', () => {
+        this.deletePin(symbol.id, pin.id);
+      });
+    }
+  }
+
+  // Update a specific property of a pin within a symbol
+  updatePinProperty(symbolId, pinId, property, value) {
+    const state = this.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const symbol = page.objects.find(o => o.id === symbolId);
+    if (!symbol || !symbol.pins) return;
+
+    const oldPins = symbol.pins.map(p => ({ ...p }));
+    const newPins = symbol.pins.map(p => {
+      if (p.id === pinId) {
+        return { ...p, [property]: value };
+      }
+      return { ...p };
+    });
+
+    this.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+      state.activePageId,
+      symbolId,
+      { pins: oldPins },
+      { pins: newPins }
+    ));
+
+    this.updatePropertiesPanel();
+  }
+
+  // Delete a pin from a symbol
+  deletePin(symbolId, pinId) {
+    const state = this.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const symbol = page.objects.find(o => o.id === symbolId);
+    if (!symbol || !symbol.pins) return;
+
+    const oldPins = symbol.pins.map(p => ({ ...p }));
+    const newPins = symbol.pins.filter(p => p.id !== pinId);
+
+    this.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+      state.activePageId,
+      symbolId,
+      { pins: oldPins },
+      { pins: newPins }
+    ));
+
+    // Clear pin selection, keep symbol selected
+    this.history.updateState(s => ({
+      ...s,
+      selection: { ids: [symbolId], handles: null, pinId: null }
+    }));
   }
 
   // Line properties panel

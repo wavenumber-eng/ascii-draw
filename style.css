@@ -25,6 +25,7 @@
   /* Text colors - Light theme */
   --text-primary: #1a1a1a;
   --text-secondary: #666666;
+  --text-dim: #888888;
   --text-canvas: #000000;
   --text-shadow: #999999;
 
@@ -35,6 +36,7 @@
 
   /* Selection colors - per object type */
   --selection-box-stroke: rgba(0, 122, 204, 0.5);
+  --selection-symbol-stroke: rgba(204, 122, 0, 0.5);
   --selection-line-stroke: rgba(0, 122, 204, 0.5);
   --selection-text-stroke: rgba(0, 122, 204, 0.5);
   --selection-default-stroke: rgba(0, 122, 204, 0.5);
@@ -411,6 +413,16 @@ kbd {
 .property-btn.active {
   background: var(--accent);
   border-color: var(--accent);
+  color: white;
+}
+
+.property-btn.danger {
+  color: #cc3333;
+}
+
+.property-btn.danger:hover {
+  background: #cc3333;
+  border-color: #cc3333;
   color: white;
 }
 

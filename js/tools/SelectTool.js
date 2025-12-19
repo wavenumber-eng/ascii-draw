@@ -13,7 +13,8 @@ const SelectMode = {
   MARQUEE: 'marquee',             // Drawing selection rectangle
   RESIZING: 'resizing',           // Resizing single object (boxes)
   LINE_POINT: 'line_point',       // Dragging a line vertex
-  LINE_SEGMENT: 'line_segment'    // Dragging a line segment midpoint
+  LINE_SEGMENT: 'line_segment',   // Dragging a line segment midpoint
+  PIN_DRAG: 'pin_drag'            // Dragging a pin along symbol edge
 };
 
 // Resize handle positions
@@ -38,6 +39,10 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     // Line point dragging state
     this.linePointIndex = null;       // Index of point being dragged
     this.lineOriginalPoints = null;   // Original points array for undo
+    // Pin dragging state
+    this.pinDragSymbolId = null;      // Symbol containing the pin
+    this.pinDragPinId = null;         // Pin being dragged
+    this.pinOriginal = null;          // Original pin data for undo
     // Line segment dragging state
     this.lineSegmentIndex = null;     // Index of segment being dragged (segment between points i and i+1)
     this.lineSegmentIsHorizontal = null; // True if segment is horizontal
@@ -70,6 +75,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.lineOriginalPoints = null;
     this.lineSegmentIndex = null;
     this.lineSegmentIsHorizontal = null;
+    this.pinDragSymbolId = null;
+    this.pinDragPinId = null;
+    this.pinOriginal = null;
   }
 
   onMouseDown(event, context) {
@@ -106,6 +114,23 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       }
     }
 
+    // Check for pin hit (before object hit so pins take priority)
+    const pinHit = this.hitTestPin(col, row, context);
+    if (pinHit) {
+      this.mode = SelectMode.PIN_DRAG;
+      this.pinDragSymbolId = pinHit.symbolId;
+      this.pinDragPinId = pinHit.pinId;
+      this.pinOriginal = { ...pinHit.pin };
+      this.dragStart = { col, row };
+
+      // Select the parent symbol AND track the selected pin
+      context.history.updateState(s => ({
+        ...s,
+        selection: { ids: [pinHit.symbolId], handles: null, pinId: pinHit.pinId }
+      }));
+      return true;
+    }
+
     // Check for object hit
     const hit = this.hitTestObject(col, row, context);
 
@@ -119,7 +144,8 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
             ...s,
             selection: {
               ids: s.selection.ids.filter(id => id !== hit.id),
-              handles: null
+              handles: null,
+              pinId: null  // Clear pin selection
             }
           }));
         } else {
@@ -127,16 +153,23 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
             ...s,
             selection: {
               ids: [...s.selection.ids, hit.id],
-              handles: null
+              handles: null,
+              pinId: null  // Clear pin selection
             }
           }));
         }
       } else {
-        // SEL-10: Regular click - select this object
+        // SEL-10: Regular click - select this object (clear pin selection)
         if (!isAlreadySelected) {
           context.history.updateState(s => ({
             ...s,
-            selection: { ids: [hit.id], handles: null }
+            selection: { ids: [hit.id], handles: null, pinId: null }
+          }));
+        } else {
+          // Clear pin selection when clicking on already-selected object (not on a pin)
+          context.history.updateState(s => ({
+            ...s,
+            selection: { ...s.selection, pinId: null }
           }));
         }
       }
@@ -162,7 +195,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       if (!event.ctrlKey) {
         context.history.updateState(s => ({
           ...s,
-          selection: { ids: [], handles: null }
+          selection: { ids: [], handles: null, pinId: null }
         }));
       }
       this.mode = SelectMode.MARQUEE;
@@ -210,6 +243,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     if (this.mode === SelectMode.LINE_SEGMENT && this.lineSegmentIndex !== null) {
       this.performLineSegmentDrag(col, row, context);
+      return true;
+    }
+
+    if (this.mode === SelectMode.PIN_DRAG && this.pinDragSymbolId) {
+      this.performPinDrag(col, row, context);
       return true;
     }
 
@@ -293,6 +331,10 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       this.finalizeLineSegmentDrag(context);
     }
 
+    if (this.mode === SelectMode.PIN_DRAG && this.pinOriginal) {
+      this.finalizePinDrag(context);
+    }
+
     if (this.mode === SelectMode.MARQUEE) {
       this.performMarqueeSelect(context);
     }
@@ -324,12 +366,12 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       }
     }
 
-    // SEL-31: Type to edit - if single box selected and printable key pressed, start editing
+    // SEL-31: Type to edit - if single box/symbol selected and printable key pressed, start editing
     if (state.selection.ids.length === 1 && event.key.length === 1 && !event.ctrlKey && !event.altKey) {
       const page = state.project.pages.find(p => p.id === state.activePageId);
       if (page) {
         const obj = page.objects.find(o => o.id === state.selection.ids[0]);
-        if (obj && obj.type === 'box' && context.startInlineEdit) {
+        if (obj && (obj.type === 'box' || obj.type === 'symbol') && context.startInlineEdit) {
           context.startInlineEdit(obj, event.key);  // Pass initial character
           return true;
         }
@@ -344,7 +386,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
     const hit = this.hitTestObject(col, row, context);
 
-    if (hit && hit.type === 'box') {
+    if (hit && (hit.type === 'box' || hit.type === 'symbol')) {
       if (context.startInlineEdit) {
         context.startInlineEdit(hit);
       }
@@ -730,12 +772,12 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       const newIds = [...new Set([...existingIds, ...selectedIds])];
       context.history.updateState(s => ({
         ...s,
-        selection: { ids: newIds, handles: null }
+        selection: { ids: newIds, handles: null, pinId: null }
       }));
     } else {
       context.history.updateState(s => ({
         ...s,
-        selection: { ids: selectedIds, handles: null }
+        selection: { ids: selectedIds, handles: null, pinId: null }
       }));
     }
   }
@@ -919,6 +961,186 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     };
   }
 
+  // OBJ-5L: Hit test for pins on symbols
+  hitTestPin(col, row, context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return null;
+
+    const symbols = page.objects.filter(o => o.type === 'symbol');
+
+    for (const symbol of symbols) {
+      if (!symbol.pins || symbol.pins.length === 0) continue;
+
+      for (const pin of symbol.pins) {
+        const pos = this.getPinPosition(symbol, pin);
+        if (pos.x === col && pos.y === row) {
+          return { symbolId: symbol.id, pinId: pin.id, pin, symbol };
+        }
+      }
+    }
+    return null;
+  }
+
+  // Calculate pin world position (same logic as Renderer)
+  getPinPosition(symbol, pin) {
+    const { x, y, width, height } = symbol;
+    const offset = pin.offset || 0.5;
+
+    switch (pin.edge) {
+      case 'left':
+        return { x: x, y: Math.floor(y + offset * (height - 1)) };
+      case 'right':
+        return { x: x + width - 1, y: Math.floor(y + offset * (height - 1)) };
+      case 'top':
+        return { x: Math.floor(x + offset * (width - 1)), y: y };
+      case 'bottom':
+        return { x: Math.floor(x + offset * (width - 1)), y: y + height - 1 };
+      default:
+        return { x: x, y: y };
+    }
+  }
+
+  // OBJ-5M: Drag pin along symbol edges
+  performPinDrag(col, row, context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const symbol = page.objects.find(o => o.id === this.pinDragSymbolId);
+    if (!symbol || !symbol.pins) return;
+
+    // Find which edge the cursor is on
+    const edgeInfo = this.findClosestEdge(symbol, col, row);
+    if (!edgeInfo) return;
+
+    // Update the pin's position
+    context.history.updateState(s => {
+      const newState = AsciiEditor.core.deepClone(s);
+      const pg = newState.project.pages.find(p => p.id === s.activePageId);
+      if (pg) {
+        const sym = pg.objects.find(o => o.id === this.pinDragSymbolId);
+        if (sym && sym.pins) {
+          const pinIdx = sym.pins.findIndex(p => p.id === this.pinDragPinId);
+          if (pinIdx >= 0) {
+            sym.pins[pinIdx].edge = edgeInfo.edge;
+            sym.pins[pinIdx].offset = edgeInfo.offset;
+          }
+        }
+      }
+      return newState;
+    });
+  }
+
+  // Find which edge of a symbol is closest to a point
+  // OBJ-5J2: Pins CANNOT be placed on corner cells
+  findClosestEdge(symbol, col, row) {
+    const { x, y, width, height } = symbol;
+
+    // Check if on left edge (excluding corners)
+    if (col === x && row > y && row < y + height - 1) {
+      const offset = height > 2 ? (row - y) / (height - 1) : 0.5;
+      return { edge: 'left', offset };
+    }
+    // Check if on right edge (excluding corners)
+    if (col === x + width - 1 && row > y && row < y + height - 1) {
+      const offset = height > 2 ? (row - y) / (height - 1) : 0.5;
+      return { edge: 'right', offset };
+    }
+    // Check if on top edge (excluding corners)
+    if (row === y && col > x && col < x + width - 1) {
+      const offset = width > 2 ? (col - x) / (width - 1) : 0.5;
+      return { edge: 'top', offset };
+    }
+    // Check if on bottom edge (excluding corners)
+    if (row === y + height - 1 && col > x && col < x + width - 1) {
+      const offset = width > 2 ? (col - x) / (width - 1) : 0.5;
+      return { edge: 'bottom', offset };
+    }
+
+    // Not on any edge - find closest edge and clamp to exclude corners
+    const distLeft = Math.abs(col - x);
+    const distRight = Math.abs(col - (x + width - 1));
+    const distTop = Math.abs(row - y);
+    const distBottom = Math.abs(row - (y + height - 1));
+
+    const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+
+    if (minDist === distLeft) {
+      // Clamp row to exclude corners (y+1 to y+height-2)
+      const clampedRow = Math.max(y + 1, Math.min(y + height - 2, row));
+      const offset = height > 2 ? (clampedRow - y) / (height - 1) : 0.5;
+      return { edge: 'left', offset };
+    }
+    if (minDist === distRight) {
+      // Clamp row to exclude corners
+      const clampedRow = Math.max(y + 1, Math.min(y + height - 2, row));
+      const offset = height > 2 ? (clampedRow - y) / (height - 1) : 0.5;
+      return { edge: 'right', offset };
+    }
+    if (minDist === distTop) {
+      // Clamp col to exclude corners (x+1 to x+width-2)
+      const clampedCol = Math.max(x + 1, Math.min(x + width - 2, col));
+      const offset = width > 2 ? (clampedCol - x) / (width - 1) : 0.5;
+      return { edge: 'top', offset };
+    }
+    // distBottom
+    const clampedCol = Math.max(x + 1, Math.min(x + width - 2, col));
+    const offset = width > 2 ? (clampedCol - x) / (width - 1) : 0.5;
+    return { edge: 'bottom', offset };
+  }
+
+  // Finalize pin drag with undo support
+  finalizePinDrag(context) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const symbol = page.objects.find(o => o.id === this.pinDragSymbolId);
+    if (!symbol || !symbol.pins) return;
+
+    const currentPin = symbol.pins.find(p => p.id === this.pinDragPinId);
+    if (!currentPin) return;
+
+    // Check if pin actually moved
+    const hasChanged = currentPin.edge !== this.pinOriginal.edge ||
+                       currentPin.offset !== this.pinOriginal.offset;
+
+    if (hasChanged) {
+      // Restore original
+      context.history.updateState(s => {
+        const newState = AsciiEditor.core.deepClone(s);
+        const pg = newState.project.pages.find(p => p.id === s.activePageId);
+        if (pg) {
+          const sym = pg.objects.find(o => o.id === this.pinDragSymbolId);
+          if (sym && sym.pins) {
+            const pinIdx = sym.pins.findIndex(p => p.id === this.pinDragPinId);
+            if (pinIdx >= 0) {
+              sym.pins[pinIdx].edge = this.pinOriginal.edge;
+              sym.pins[pinIdx].offset = this.pinOriginal.offset;
+            }
+          }
+        }
+        return newState;
+      });
+
+      // Execute command for undo/redo
+      const newPins = symbol.pins.map(p => {
+        if (p.id === this.pinDragPinId) {
+          return { ...p, edge: currentPin.edge, offset: currentPin.offset };
+        }
+        return { ...p };
+      });
+
+      context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+        state.activePageId,
+        symbol.id,
+        { pins: symbol.pins.map(p => ({ ...p })) },
+        { pins: newPins }
+      ));
+    }
+  }
+
   // SEL-3: Visual distinction for marquee modes
   renderOverlay(ctx, context) {
     const state = context.history.getState();
@@ -932,6 +1154,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     const marqueeEnclosedFill = styles.getPropertyValue('--marquee-enclosed-fill').trim() || 'rgba(0, 122, 204, 0.1)';
     const marqueeIntersectStroke = styles.getPropertyValue('--marquee-intersect-stroke').trim() || '#00cc7a';
     const marqueeIntersectFill = styles.getPropertyValue('--marquee-intersect-fill').trim() || 'rgba(0, 204, 122, 0.1)';
+    const pinSelectionColor = styles.getPropertyValue('--accent-secondary').trim() || '#00aa66';
 
     // Draw marquee selection rectangle
     if (this.mode === SelectMode.MARQUEE && this.dragStart && this.dragCurrent) {
@@ -970,6 +1193,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     // Per-object-type stroke colors
     const selectionStrokes = {
       box: styles.getPropertyValue('--selection-box-stroke').trim() || 'rgba(0, 122, 204, 0.5)',
+      symbol: styles.getPropertyValue('--selection-symbol-stroke').trim() || 'rgba(204, 122, 0, 0.5)',
       line: styles.getPropertyValue('--selection-line-stroke').trim() || 'rgba(0, 122, 204, 0.5)',
       text: styles.getPropertyValue('--selection-text-stroke').trim() || 'rgba(0, 122, 204, 0.5)',
       default: styles.getPropertyValue('--selection-default-stroke').trim() || 'rgba(0, 122, 204, 0.5)'
@@ -1019,6 +1243,37 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         }
       }
     });
+
+    // Draw selected pin highlight
+    if (state.selection.pinId && state.selection.ids.length === 1) {
+      const symbol = page.objects.find(o => o.id === state.selection.ids[0]);
+      if (symbol && symbol.type === 'symbol' && symbol.pins) {
+        const pin = symbol.pins.find(p => p.id === state.selection.pinId);
+        if (pin) {
+          const pos = this.getPinPosition(symbol, pin);
+          const pixel = context.grid.charToPixel(pos.x, pos.y);
+
+          // Draw highlight box around the selected pin
+          ctx.strokeStyle = pinSelectionColor;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([]);
+          ctx.strokeRect(
+            pixel.x - 2,
+            pixel.y - 2,
+            context.grid.charWidth + 4,
+            context.grid.charHeight + 4
+          );
+
+          // Draw corner markers
+          const markerSize = 4;
+          ctx.fillStyle = pinSelectionColor;
+          ctx.fillRect(pixel.x - 2, pixel.y - 2, markerSize, markerSize);
+          ctx.fillRect(pixel.x + context.grid.charWidth + 2 - markerSize, pixel.y - 2, markerSize, markerSize);
+          ctx.fillRect(pixel.x - 2, pixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
+          ctx.fillRect(pixel.x + context.grid.charWidth + 2 - markerSize, pixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
+        }
+      }
+    }
   }
 
   // Draw handles at each point of a line
