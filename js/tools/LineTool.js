@@ -164,6 +164,7 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
 
     // OBJ-3A6: Space key toggles posture
     if (event.key === ' ' || event.code === 'Space') {
+      event.preventDefault();  // Prevent browser scroll
       if (this.drawing) {
         this.hFirst = !this.hFirst;
         return true; // Redraw with new posture

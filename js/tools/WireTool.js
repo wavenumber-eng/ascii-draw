@@ -99,14 +99,25 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
         this.points.push(previewPath[i]);
       }
 
-      // Check if clicked point hits an existing wire - auto-finish for connection
+      // Check if clicked point hits an existing wire or pin - auto-finish for connection
       const state = context.history.getState();
       const page = state.project.pages.find(p => p.id === state.activePageId);
       if (page) {
-        const hits = this.findWiresAtPoint(clickPos, page.objects);
-        if (hits.length > 0) {
+        // Auto-finish on wire hit
+        const wireHits = this.findWiresAtPoint(clickPos, page.objects);
+        if (wireHits.length > 0) {
           this.finishWire(context);
           return true;
+        }
+
+        // Auto-finish on existing pin hit (BIND PIN)
+        const edgeInfo = this.findSymbolEdge(clickPos, page.objects);
+        if (edgeInfo) {
+          const existingPin = this.findPinAtEdge(edgeInfo.symbol, edgeInfo.edge, edgeInfo.offset);
+          if (existingPin) {
+            this.finishWire(context);
+            return true;
+          }
         }
       }
     }
@@ -145,6 +156,7 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
 
     // Space key toggles posture
     if (event.key === ' ' || event.code === 'Space') {
+      event.preventDefault();  // Prevent browser scroll
       if (this.drawing) {
         this.hFirst = !this.hFirst;
         return true;

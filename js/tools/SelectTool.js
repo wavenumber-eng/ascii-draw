@@ -40,6 +40,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     // Line point dragging state
     this.linePointIndex = null;       // Index of point being dragged
     this.lineOriginalPoints = null;   // Original points array for undo
+    this.lineOriginalBinding = null;  // OBJ-69: Original binding for endpoint drag
     // Pin dragging state
     this.pinDragSymbolId = null;      // Symbol containing the pin
     this.pinDragPinId = null;         // Pin being dragged
@@ -57,6 +58,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.activeHandle = null;
     this.resizeOriginal = null;
     this.addToSelection = false;  // Ctrl key held
+    this.altKeyHeld = false;       // OBJ-68: Alt key breaks wire bindings during drag
   }
 
   activate(context) {
@@ -79,6 +81,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.addToSelection = false;
     this.linePointIndex = null;
     this.lineOriginalPoints = null;
+    this.lineOriginalBinding = null;
     this.lineSegmentIndex = null;
     this.lineSegmentIsHorizontal = null;
     this.pinDragSymbolId = null;
@@ -88,6 +91,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.labelDragType = null;
     this.labelDragParamIndex = null;
     this.labelOriginalOffset = null;
+    this.altKeyHeld = false;
   }
 
   onMouseDown(event, context) {
@@ -106,6 +110,20 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           this.mode = SelectMode.LINE_POINT;
           this.linePointIndex = handle.pointIndex;
           this.lineOriginalPoints = handle.obj.points.map(p => ({ ...p }));
+          // OBJ-69: Store original binding if dragging a wire endpoint
+          if (handle.obj.type === 'wire') {
+            const isStart = handle.pointIndex === 0;
+            const isEnd = handle.pointIndex === handle.obj.points.length - 1;
+            if (isStart && handle.obj.startBinding) {
+              this.lineOriginalBinding = { type: 'start', binding: { ...handle.obj.startBinding } };
+            } else if (isEnd && handle.obj.endBinding) {
+              this.lineOriginalBinding = { type: 'end', binding: { ...handle.obj.endBinding } };
+            } else {
+              this.lineOriginalBinding = null;
+            }
+          } else {
+            this.lineOriginalBinding = null;
+          }
           return true;
         } else if (handle.type === 'line_segment') {
           // Start dragging a line segment
@@ -252,6 +270,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
       // Prepare for dragging
       this.mode = SelectMode.DRAGGING;
+      this.altKeyHeld = event.altKey;  // OBJ-68: Track alt key for breaking wire bindings
       const currentState = context.history.getState();
       this.draggedIds = [...currentState.selection.ids];
 
@@ -266,14 +285,15 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           if (obj) {
             this.originalPositions[id] = { x: obj.x, y: obj.y };
 
-            // OBJ-69: Store original wire endpoints for symbols
+            // OBJ-67: Store original wire state for rubberbanding (full points for proper restore)
             if (obj.type === 'symbol') {
               const boundWires = this.findWiresBoundToSymbol(id, page.objects);
               boundWires.forEach(wire => {
                 if (!this.originalWireEndpoints[wire.id]) {
                   this.originalWireEndpoints[wire.id] = {
                     start: wire.points[0] ? { x: wire.points[0].x, y: wire.points[0].y } : null,
-                    end: wire.points[wire.points.length - 1] ? { x: wire.points[wire.points.length - 1].x, y: wire.points[wire.points.length - 1].y } : null
+                    end: wire.points[wire.points.length - 1] ? { x: wire.points[wire.points.length - 1].x, y: wire.points[wire.points.length - 1].y } : null,
+                    allPoints: wire.points.map(p => ({ x: p.x, y: p.y }))
                   };
                 }
               });
@@ -315,8 +335,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
               obj.x = orig.x + dx;
               obj.y = orig.y + dy;
 
-              // OBJ-69: Update bound wire endpoints when symbol moves
-              if (obj.type === 'symbol') {
+              // OBJ-67: Update bound wire endpoints when symbol moves
+              // OBJ-68: Skip if Alt key held (breaks binding)
+              if (obj.type === 'symbol' && !this.altKeyHeld) {
                 this.updateBoundWireEndpoints(page, id, dx, dy);
               }
             }
@@ -402,20 +423,14 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
               }
             });
 
-            // OBJ-69: Restore wire endpoints
+            // OBJ-67: Restore full wire points array
             if (this.originalWireEndpoints) {
               for (const wireId in this.originalWireEndpoints) {
                 const wire = page.objects.find(o => o.id === wireId);
                 const orig = this.originalWireEndpoints[wireId];
-                if (wire && wire.points && orig) {
-                  if (orig.start) {
-                    wire.points[0].x = orig.start.x;
-                    wire.points[0].y = orig.start.y;
-                  }
-                  if (orig.end) {
-                    wire.points[wire.points.length - 1].x = orig.end.x;
-                    wire.points[wire.points.length - 1].y = orig.end.y;
-                  }
+                if (wire && orig && orig.allPoints) {
+                  // Restore full points array
+                  wire.points = orig.allPoints.map(p => ({ x: p.x, y: p.y }));
                 }
               }
             }
@@ -424,8 +439,8 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         });
 
         // Execute move commands for undo/redo
-        const state = context.history.getState();
-        const page = state.project.pages.find(p => p.id === state.activePageId);
+        let state = context.history.getState();
+        let page = state.project.pages.find(p => p.id === state.activePageId);
 
         this.draggedIds.forEach(id => {
           const orig = this.originalPositions[id];
@@ -439,52 +454,137 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           }
         });
 
-        // OBJ-69: Execute wire endpoint update commands for symbols
+        // OBJ-67/68: Handle wire endpoint updates for symbols
+        // Re-get state after move commands to see updated symbol positions
+        state = context.history.getState();
+        page = state.project.pages.find(p => p.id === state.activePageId);
+
         if (this.originalWireEndpoints && page) {
           for (const wireId in this.originalWireEndpoints) {
             const wire = page.objects.find(o => o.id === wireId);
             const orig = this.originalWireEndpoints[wireId];
             if (!wire || !wire.points || !orig) continue;
 
-            // Calculate new positions based on bound symbol positions
-            const newPoints = wire.points.map(p => ({ x: p.x, y: p.y }));
-            let needsUpdate = false;
+            // OBJ-68: If Alt key was held, break bindings instead of rubberbanding
+            if (this.altKeyHeld) {
+              const oldProps = {};
+              const newProps = {};
+              let needsUpdate = false;
 
-            // Check start binding
-            if (wire.startBinding && orig.start) {
-              const symbol = page.objects.find(o => o.id === wire.startBinding.symbolId);
-              if (symbol && symbol.pins) {
-                const pin = symbol.pins.find(p => p.id === wire.startBinding.pinId);
-                if (pin) {
-                  // Get current pin position (symbol has already been moved by MoveObjectCommand)
-                  const newPos = this.getPinPosition(symbol, pin);
-                  newPoints[0] = { x: newPos.x, y: newPos.y };
+              // Check which bindings are to moved symbols and break them
+              for (const draggedId of this.draggedIds) {
+                if (wire.startBinding?.symbolId === draggedId) {
+                  oldProps.startBinding = wire.startBinding;
+                  newProps.startBinding = null;
+                  needsUpdate = true;
+                }
+                if (wire.endBinding?.symbolId === draggedId) {
+                  oldProps.endBinding = wire.endBinding;
+                  newProps.endBinding = null;
                   needsUpdate = true;
                 }
               }
-            }
 
-            // Check end binding
-            if (wire.endBinding && orig.end) {
-              const symbol = page.objects.find(o => o.id === wire.endBinding.symbolId);
-              if (symbol && symbol.pins) {
-                const pin = symbol.pins.find(p => p.id === wire.endBinding.pinId);
-                if (pin) {
-                  const newPos = this.getPinPosition(symbol, pin);
-                  newPoints[newPoints.length - 1] = { x: newPos.x, y: newPos.y };
-                  needsUpdate = true;
+              if (needsUpdate) {
+                context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+                  state.activePageId,
+                  wireId,
+                  oldProps,
+                  newProps
+                ));
+              }
+            } else {
+              // OBJ-67: Normal rubberbanding - update wire endpoints to follow pins
+              // Start with original points and build new path with proper orthogonality
+              const origPoints = orig.allPoints.map(p => ({ x: p.x, y: p.y }));
+              let newPoints = orig.allPoints.map(p => ({ x: p.x, y: p.y }));
+              let needsUpdate = false;
+
+              // Check start binding - process first to maintain correct indices
+              if (wire.startBinding && orig.start) {
+                const symbol = page.objects.find(o => o.id === wire.startBinding.symbolId);
+                if (symbol && symbol.pins) {
+                  const pin = symbol.pins.find(p => p.id === wire.startBinding.pinId);
+                  if (pin) {
+                    const newPos = this.getPinPosition(symbol, pin);
+                    const pinEdge = pin.edge;
+                    const exitHorizontal = (pinEdge === 'left' || pinEdge === 'right');
+
+                    if (newPoints.length >= 3) {
+                      // Wire has intermediate points - adjust adjacent point
+                      if (exitHorizontal) {
+                        newPoints[1].y = newPos.y;
+                      } else {
+                        newPoints[1].x = newPos.x;
+                      }
+                    } else if (newPoints.length === 2) {
+                      const nextPoint = newPoints[1];
+                      const needsVertices = (newPos.x !== nextPoint.x && newPos.y !== nextPoint.y);
+
+                      if (needsVertices) {
+                        const midX = Math.round((newPos.x + nextPoint.x) / 2);
+                        newPoints.splice(1, 0,
+                          { x: midX, y: newPos.y },
+                          { x: midX, y: nextPoint.y }
+                        );
+                      }
+                    }
+
+                    newPoints[0] = { x: newPos.x, y: newPos.y };
+                    needsUpdate = true;
+                  }
                 }
               }
-            }
 
-            if (needsUpdate) {
-              const origPoints = wire.points.map(p => ({ x: p.x, y: p.y }));
-              context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
-                state.activePageId,
-                wireId,
-                { points: origPoints },
-                { points: newPoints }
-              ));
+              // Check end binding
+              if (wire.endBinding && orig.end) {
+                const symbol = page.objects.find(o => o.id === wire.endBinding.symbolId);
+                if (symbol && symbol.pins) {
+                  const pin = symbol.pins.find(p => p.id === wire.endBinding.pinId);
+                  if (pin) {
+                    const newPos = this.getPinPosition(symbol, pin);
+                    const pinEdge = pin.edge;
+                    const entryHorizontal = (pinEdge === 'left' || pinEdge === 'right');
+                    const lastIdx = newPoints.length - 1;
+
+                    if (newPoints.length >= 3) {
+                      // Wire has intermediate points - adjust adjacent point
+                      if (entryHorizontal) {
+                        newPoints[lastIdx - 1].y = newPos.y;
+                      } else {
+                        newPoints[lastIdx - 1].x = newPos.x;
+                      }
+                    } else if (newPoints.length === 2) {
+                      const prevPoint = newPoints[lastIdx - 1];
+                      const needsVertices = (newPos.x !== prevPoint.x && newPos.y !== prevPoint.y);
+
+                      if (needsVertices) {
+                        const midX = Math.round((prevPoint.x + newPos.x) / 2);
+                        newPoints.splice(lastIdx, 0,
+                          { x: midX, y: prevPoint.y },
+                          { x: midX, y: newPos.y }
+                        );
+                      }
+                    }
+
+                    // Update endpoint (index may have changed)
+                    const newLastIdx = newPoints.length - 1;
+                    newPoints[newLastIdx] = { x: newPos.x, y: newPos.y };
+                    needsUpdate = true;
+                  }
+                }
+              }
+
+              if (needsUpdate) {
+                // Simplify points to remove collinear points after adjustments
+                const simplifiedPoints = this.simplifyLinePoints(newPoints);
+                context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+                  state.activePageId,
+                  wireId,
+                  { points: origPoints },
+                  { points: simplifiedPoints }
+                ));
+              }
             }
           }
         }
@@ -783,8 +883,47 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         return !curr || orig.x !== curr.x || orig.y !== curr.y;
       });
 
-    if (hasChanged) {
-      // Restore original
+    // OBJ-69: Check if wire endpoint was dragged away from its bound pin
+    let bindingBroken = false;
+    let bindingOldProps = {};
+    let bindingNewProps = {};
+
+    if (obj.type === 'wire' && this.lineOriginalBinding && hasChanged) {
+      const binding = this.lineOriginalBinding.binding;
+      const bindingType = this.lineOriginalBinding.type;
+
+      // Find the pin position
+      const symbol = page.objects.find(o => o.id === binding.symbolId);
+      if (symbol && symbol.pins) {
+        const pin = symbol.pins.find(p => p.id === binding.pinId);
+        if (pin) {
+          const pinPos = this.getPinPosition(symbol, pin);
+
+          // Check if the endpoint is still on the pin
+          let endpointPos;
+          if (bindingType === 'start') {
+            endpointPos = newPoints[0];
+          } else {
+            endpointPos = newPoints[newPoints.length - 1];
+          }
+
+          // If endpoint moved away from pin, break the binding
+          if (endpointPos && (endpointPos.x !== pinPos.x || endpointPos.y !== pinPos.y)) {
+            bindingBroken = true;
+            if (bindingType === 'start') {
+              bindingOldProps.startBinding = obj.startBinding;
+              bindingNewProps.startBinding = null;
+            } else {
+              bindingOldProps.endBinding = obj.endBinding;
+              bindingNewProps.endBinding = null;
+            }
+          }
+        }
+      }
+    }
+
+    if (hasChanged || bindingBroken) {
+      // Restore original state
       context.history.updateState(s => {
         const newState = AsciiEditor.core.deepClone(s);
         const pg = newState.project.pages.find(p => p.id === s.activePageId);
@@ -792,17 +931,28 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
           if (lineObj) {
             lineObj.points = origPoints.map(p => ({ ...p }));
+            // Restore binding if it was broken
+            if (bindingBroken && this.lineOriginalBinding) {
+              if (this.lineOriginalBinding.type === 'start') {
+                lineObj.startBinding = this.lineOriginalBinding.binding;
+              } else {
+                lineObj.endBinding = this.lineOriginalBinding.binding;
+              }
+            }
           }
         }
         return newState;
       });
 
       // Execute command for undo/redo
+      const oldProps = { points: origPoints, ...bindingOldProps };
+      const newProps = { points: newPoints, ...bindingNewProps };
+
       context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
         state.activePageId,
         obj.id,
-        { points: origPoints },
-        { points: newPoints }
+        oldProps,
+        newProps
       ));
     }
   }
@@ -1226,7 +1376,8 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     });
   }
 
-  // OBJ-69: Update wire endpoints based on pin positions after symbol move
+  // OBJ-67: Update wire endpoints based on pin positions after symbol move
+  // Maintains orthogonality and clean wire exit from pins
   updateBoundWireEndpoints(page, symbolId, dx, dy) {
     const symbol = page.objects.find(o => o.id === symbolId);
     if (!symbol || !symbol.pins) return;
@@ -1236,11 +1387,45 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     for (const wire of wires) {
       if (!wire.points || wire.points.length < 2) continue;
 
+      // Get original point count to detect if we've already inserted vertices
+      const orig = this.originalWireEndpoints?.[wire.id];
+      const originalPointCount = orig?.allPoints?.length || wire.points.length;
+
       // Update start endpoint if bound to this symbol
       if (wire.startBinding?.symbolId === symbolId) {
         const pin = symbol.pins.find(p => p.id === wire.startBinding.pinId);
         if (pin) {
           const newPos = this.getPinPosition(symbol, pin);
+          const pinEdge = pin.edge; // 'left', 'right', 'top', 'bottom'
+
+          // Determine if wire exit should be horizontal or vertical based on pin edge
+          const exitHorizontal = (pinEdge === 'left' || pinEdge === 'right');
+
+          if (wire.points.length >= 3 || wire.points.length > originalPointCount) {
+            // Wire has intermediate points - adjust adjacent point to maintain clean exit
+            if (exitHorizontal) {
+              // For left/right pins: keep first segment horizontal by matching Y
+              wire.points[1].y = newPos.y;
+            } else {
+              // For top/bottom pins: keep first segment vertical by matching X
+              wire.points[1].x = newPos.x;
+            }
+          } else if (wire.points.length === 2) {
+            // Only 2 points - check if we need to insert vertices
+            const nextPoint = wire.points[1];
+            const needsVertices = (newPos.x !== nextPoint.x && newPos.y !== nextPoint.y);
+
+            if (needsVertices) {
+              // Insert 2 vertices to create orthogonal staircase pattern
+              const midX = Math.round((newPos.x + nextPoint.x) / 2);
+              wire.points.splice(1, 0,
+                { x: midX, y: newPos.y },
+                { x: midX, y: nextPoint.y }
+              );
+            }
+          }
+
+          // Update the endpoint to new pin position
           wire.points[0].x = newPos.x;
           wire.points[0].y = newPos.y;
         }
@@ -1251,8 +1436,40 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         const pin = symbol.pins.find(p => p.id === wire.endBinding.pinId);
         if (pin) {
           const newPos = this.getPinPosition(symbol, pin);
-          wire.points[wire.points.length - 1].x = newPos.x;
-          wire.points[wire.points.length - 1].y = newPos.y;
+          const pinEdge = pin.edge;
+          const lastIdx = wire.points.length - 1;
+
+          // Determine if wire entry should be horizontal or vertical based on pin edge
+          const entryHorizontal = (pinEdge === 'left' || pinEdge === 'right');
+
+          if (wire.points.length >= 3 || wire.points.length > originalPointCount) {
+            // Wire has intermediate points - adjust adjacent point to maintain clean entry
+            if (entryHorizontal) {
+              // For left/right pins: keep last segment horizontal by matching Y
+              wire.points[lastIdx - 1].y = newPos.y;
+            } else {
+              // For top/bottom pins: keep last segment vertical by matching X
+              wire.points[lastIdx - 1].x = newPos.x;
+            }
+          } else if (wire.points.length === 2) {
+            // Only 2 points - check if we need to insert vertices
+            const prevPoint = wire.points[lastIdx - 1];
+            const needsVertices = (newPos.x !== prevPoint.x && newPos.y !== prevPoint.y);
+
+            if (needsVertices) {
+              // Insert 2 vertices to create orthogonal staircase pattern
+              const midX = Math.round((prevPoint.x + newPos.x) / 2);
+              wire.points.splice(lastIdx, 0,
+                { x: midX, y: prevPoint.y },
+                { x: midX, y: newPos.y }
+              );
+            }
+          }
+
+          // Update the endpoint to new pin position (index may have changed due to splice)
+          const newLastIdx = wire.points.length - 1;
+          wire.points[newLastIdx].x = newPos.x;
+          wire.points[newLastIdx].y = newPos.y;
         }
       }
     }
