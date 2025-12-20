@@ -107,7 +107,9 @@ solveConstraints(page, maxIterations=10):
 - OBJ-67: Wire rubberbanding when symbol moves
 - OBJ-68: Alt key breaks wire binding during drag
 - OBJ-69: Dragging wire endpoint away from pin breaks binding
+- OBJ-6A: Dragging wire endpoint to pin/symbol edge rebinds (auto-creates pin if needed)
 - 2-vertex insertion for diagonal moves
 - Pin edge-aware routing (horizontal exit for left/right pins, vertical for top/bottom)
 - No staircase accumulation during drag
-- Auto-finish wire on pin click
+- Auto-finish wire on pin click (CREATE PIN or BIND PIN)
+- Auto-posture based on pin edge for clean wire exit

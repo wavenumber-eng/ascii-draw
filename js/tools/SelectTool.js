@@ -883,46 +883,64 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         return !curr || orig.x !== curr.x || orig.y !== curr.y;
       });
 
-    // OBJ-69: Check if wire endpoint was dragged away from its bound pin
-    let bindingBroken = false;
+    // OBJ-69: Check if wire endpoint binding changed (broken or created)
+    let bindingChanged = false;
     let bindingOldProps = {};
     let bindingNewProps = {};
 
-    if (obj.type === 'wire' && this.lineOriginalBinding && hasChanged) {
-      const binding = this.lineOriginalBinding.binding;
-      const bindingType = this.lineOriginalBinding.type;
+    if (obj.type === 'wire' && hasChanged) {
+      const isStartEndpoint = this.linePointIndex === 0;
+      const isEndEndpoint = this.linePointIndex === this.lineOriginalPoints.length - 1;
 
-      // Find the pin position
-      const symbol = page.objects.find(o => o.id === binding.symbolId);
-      if (symbol && symbol.pins) {
-        const pin = symbol.pins.find(p => p.id === binding.pinId);
-        if (pin) {
-          const pinPos = this.getPinPosition(symbol, pin);
+      if (isStartEndpoint || isEndEndpoint) {
+        const endpointPos = isStartEndpoint ? newPoints[0] : newPoints[newPoints.length - 1];
+        const currentBinding = isStartEndpoint ? obj.startBinding : obj.endBinding;
+        const bindingKey = isStartEndpoint ? 'startBinding' : 'endBinding';
 
-          // Check if the endpoint is still on the pin
-          let endpointPos;
-          if (bindingType === 'start') {
-            endpointPos = newPoints[0];
-          } else {
-            endpointPos = newPoints[newPoints.length - 1];
+        // Check if endpoint was dragged away from its bound pin
+        if (this.lineOriginalBinding && currentBinding) {
+          const binding = this.lineOriginalBinding.binding;
+          const symbol = page.objects.find(o => o.id === binding.symbolId);
+          if (symbol && symbol.pins) {
+            const pin = symbol.pins.find(p => p.id === binding.pinId);
+            if (pin) {
+              const pinPos = this.getPinPosition(symbol, pin);
+              if (endpointPos.x !== pinPos.x || endpointPos.y !== pinPos.y) {
+                // Endpoint moved away - break binding
+                bindingChanged = true;
+                bindingOldProps[bindingKey] = currentBinding;
+                bindingNewProps[bindingKey] = null;
+              }
+            }
           }
+        }
 
-          // If endpoint moved away from pin, break the binding
-          if (endpointPos && (endpointPos.x !== pinPos.x || endpointPos.y !== pinPos.y)) {
-            bindingBroken = true;
-            if (bindingType === 'start') {
-              bindingOldProps.startBinding = obj.startBinding;
-              bindingNewProps.startBinding = null;
-            } else {
-              bindingOldProps.endBinding = obj.endBinding;
-              bindingNewProps.endBinding = null;
+        // Check if endpoint was dragged TO a pin or symbol edge (create/rebind)
+        if (!bindingChanged) {
+          const bindResult = this.bindEndpointToPin(endpointPos, page, context);
+          if (bindResult) {
+            const newBinding = bindResult.binding;
+            // Check if this is a different binding than before
+            const hadBinding = currentBinding !== null;
+            const sameBinding = hadBinding &&
+              currentBinding.symbolId === newBinding.symbolId &&
+              currentBinding.pinId === newBinding.pinId;
+
+            if (!sameBinding) {
+              bindingChanged = true;
+              bindingOldProps[bindingKey] = currentBinding;
+              bindingNewProps[bindingKey] = newBinding;
+              // Store pin creation command for later execution
+              if (bindResult.createPinCommand) {
+                this._pendingPinCreation = bindResult.createPinCommand;
+              }
             }
           }
         }
       }
     }
 
-    if (hasChanged || bindingBroken) {
+    if (hasChanged || bindingChanged) {
       // Restore original state
       context.history.updateState(s => {
         const newState = AsciiEditor.core.deepClone(s);
@@ -931,8 +949,8 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
           if (lineObj) {
             lineObj.points = origPoints.map(p => ({ ...p }));
-            // Restore binding if it was broken
-            if (bindingBroken && this.lineOriginalBinding) {
+            // Restore original binding state
+            if (bindingChanged && this.lineOriginalBinding) {
               if (this.lineOriginalBinding.type === 'start') {
                 lineObj.startBinding = this.lineOriginalBinding.binding;
               } else {
@@ -943,6 +961,13 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         }
         return newState;
       });
+
+      // Execute pending pin creation command first (if any)
+      // This happens when wire endpoint is dragged to a symbol edge with no existing pin
+      if (this._pendingPinCreation) {
+        context.history.execute(this._pendingPinCreation);
+        this._pendingPinCreation = null;
+      }
 
       // Execute command for undo/redo
       const oldProps = { points: origPoints, ...bindingOldProps };
@@ -955,6 +980,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         newProps
       ));
     }
+
+    // Clear any pending pin creation if we didn't use it
+    this._pendingPinCreation = null;
   }
 
   /**
@@ -1346,6 +1374,115 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       }
     }
     return null;
+  }
+
+  // Find pin at a given position (for wire rebinding)
+  findPinAtPosition(point, objects) {
+    const symbols = objects.filter(o => o.type === 'symbol');
+
+    for (const symbol of symbols) {
+      if (!symbol.pins || symbol.pins.length === 0) continue;
+
+      for (const pin of symbol.pins) {
+        const pos = this.getPinPosition(symbol, pin);
+        if (pos.x === point.x && pos.y === point.y) {
+          return { symbolId: symbol.id, pinId: pin.id };
+        }
+      }
+    }
+    return null;
+  }
+
+  // Find if a point is on a symbol edge (excluding corners)
+  // Returns { symbol, edge, offset } or null
+  findSymbolEdge(point, objects) {
+    const symbols = objects.filter(o => o.type === 'symbol');
+
+    for (const symbol of symbols) {
+      const { x, y, width, height } = symbol;
+
+      // Check left edge (excluding corners)
+      if (point.x === x && point.y > y && point.y < y + height - 1) {
+        const offset = height > 2 ? (point.y - y) / (height - 1) : 0.5;
+        return { symbol, edge: 'left', offset };
+      }
+
+      // Check right edge (excluding corners)
+      if (point.x === x + width - 1 && point.y > y && point.y < y + height - 1) {
+        const offset = height > 2 ? (point.y - y) / (height - 1) : 0.5;
+        return { symbol, edge: 'right', offset };
+      }
+
+      // Check top edge (excluding corners)
+      if (point.y === y && point.x > x && point.x < x + width - 1) {
+        const offset = width > 2 ? (point.x - x) / (width - 1) : 0.5;
+        return { symbol, edge: 'top', offset };
+      }
+
+      // Check bottom edge (excluding corners)
+      if (point.y === y + height - 1 && point.x > x && point.x < x + width - 1) {
+        const offset = width > 2 ? (point.x - x) / (width - 1) : 0.5;
+        return { symbol, edge: 'bottom', offset };
+      }
+    }
+    return null;
+  }
+
+  // Find existing pin at symbol edge position
+  findPinAtEdge(symbol, edge, offset) {
+    if (!symbol.pins) return null;
+    const tolerance = 0.05;
+    return symbol.pins.find(pin =>
+      pin.edge === edge && Math.abs(pin.offset - offset) < tolerance
+    );
+  }
+
+  // Bind wire endpoint to pin, auto-creating pin if needed
+  // Returns { symbolId, pinId } binding or null, plus any command to execute
+  bindEndpointToPin(point, page, context) {
+    // First check if there's an existing pin at this exact position
+    const existingBinding = this.findPinAtPosition(point, page.objects);
+    if (existingBinding) {
+      return { binding: existingBinding, createPinCommand: null };
+    }
+
+    // Check if point is on a symbol edge
+    const edgeInfo = this.findSymbolEdge(point, page.objects);
+    if (!edgeInfo) {
+      return null;
+    }
+
+    const { symbol, edge, offset } = edgeInfo;
+
+    // Check for existing pin at this edge position
+    let pin = this.findPinAtEdge(symbol, edge, offset);
+
+    if (pin) {
+      return { binding: { symbolId: symbol.id, pinId: pin.id }, createPinCommand: null };
+    }
+
+    // Need to create a new pin
+    const newPin = {
+      id: AsciiEditor.core.generateId(),
+      name: '',
+      edge: edge,
+      offset: offset,
+      shape: 'circle-outline',
+      direction: 'bidirectional'
+    };
+
+    const updatedPins = [...(symbol.pins || []), newPin];
+    const createPinCommand = new AsciiEditor.core.ModifyObjectCommand(
+      context.history.getState().activePageId,
+      symbol.id,
+      { pins: symbol.pins || [] },
+      { pins: updatedPins }
+    );
+
+    return {
+      binding: { symbolId: symbol.id, pinId: newPin.id },
+      createPinCommand: createPinCommand
+    };
   }
 
   // Calculate pin world position (same logic as Renderer)

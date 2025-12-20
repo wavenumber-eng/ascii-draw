@@ -86,7 +86,18 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
     const clickPos = { x: col, y: row };
 
     if (!this.drawing) {
-      // First point
+      // First point - check if starting on a symbol edge and set posture for clean exit
+      const state = context.history.getState();
+      const page = state.project.pages.find(p => p.id === state.activePageId);
+      if (page) {
+        const edgeInfo = this.findSymbolEdge(clickPos, page.objects);
+        if (edgeInfo) {
+          // Set posture based on pin edge for clean exit
+          // Right/Left pins → horizontal first, Top/Bottom pins → vertical first
+          this.hFirst = (edgeInfo.edge === 'right' || edgeInfo.edge === 'left');
+        }
+      }
+
       this.points.push(clickPos);
       this.drawing = true;
       this.currentPos = clickPos;
@@ -110,14 +121,11 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
           return true;
         }
 
-        // Auto-finish on existing pin hit (BIND PIN)
+        // Auto-finish on symbol edge (CREATE PIN or BIND PIN)
         const edgeInfo = this.findSymbolEdge(clickPos, page.objects);
         if (edgeInfo) {
-          const existingPin = this.findPinAtEdge(edgeInfo.symbol, edgeInfo.edge, edgeInfo.offset);
-          if (existingPin) {
-            this.finishWire(context);
-            return true;
-          }
+          this.finishWire(context);
+          return true;
         }
       }
     }
@@ -479,8 +487,8 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
       ctx.fillText(label, cx + 12, cy - 8);
     }
 
-    // Draw crosshair cursor when not drawing
-    if (!this.drawing && this.currentPos) {
+    // Draw crosshair cursor when not drawing (skip if hovering over pin or wire)
+    if (!this.drawing && this.currentPos && !pinHoverTarget && !wireHoverTarget) {
       const pixel = grid.charToPixel(this.currentPos.x, this.currentPos.y);
       const cx = pixel.x + offsetX;
       const cy = pixel.y + offsetY;
@@ -540,6 +548,28 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
       const styleInfo = `${this.currentStyle.hotkey}:${this.currentStyle.label}`;
       const netInfo = this.netName ? ` net:${this.netName}` : '';
       ctx.fillText(`${this.points.length}pts ${postureLabel} [${styleInfo}]${netInfo}`, labelPixel.x + offsetX + 8, labelPixel.y + offsetY - 8);
+    }
+
+    // Draw pin indicator on top of everything (so it's visible over wire path)
+    if (pinHoverTarget) {
+      const pixel = grid.charToPixel(pinHoverTarget.point.x, pinHoverTarget.point.y);
+      const cx = pixel.x + offsetX;
+      const cy = pixel.y + offsetY;
+
+      const pinColor = pinHoverTarget.hasExistingPin ? accent : accentSecondary;
+
+      // Filled circle background for visibility
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Pin circle
+      ctx.strokeStyle = pinColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.stroke();
     }
   }
 };

@@ -378,18 +378,21 @@ Per VIS-40 to VIS-4E:
 
 ## Testing Checklist
 
-- [ ] Create wire with W key
+- [x] Create wire with W key
 - [ ] Wire saves net name
 - [ ] Net label displays on canvas
-- [ ] Wire endpoint on symbol edge auto-creates pin
-- [ ] Wire binds to existing pin
-- [ ] Move symbol → bound wire endpoints follow
+- [x] Wire endpoint on symbol edge auto-creates pin
+- [x] Wire binds to existing pin
+- [x] Move symbol → bound wire endpoints follow
+- [x] Alt key during symbol drag breaks wire binding
+- [x] Drag wire endpoint away from pin breaks binding
+- [x] Drag wire endpoint to pin/symbol edge rebinds (auto-creates pin if needed)
 - [ ] Delete pin → wire binding cleared
 - [ ] Wire-to-wire junction created at intersection
 - [ ] Junction propagates net name
 - [ ] Properties panel shows wire properties
 - [ ] Multi-select wires → edit common net name
-- [ ] Undo/redo works for all wire operations
+- [x] Undo/redo works for all wire operations
 
 ---
 
