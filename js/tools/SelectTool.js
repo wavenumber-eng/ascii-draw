@@ -1140,10 +1140,12 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       // OBJ-9: Skip objects marked as not selectable
       if (obj.selectable === false) return;
 
-      const objX1 = obj.x;
-      const objY1 = obj.y;
-      const objX2 = obj.x + (obj.width || 10) - 1;
-      const objY2 = obj.y + (obj.height || 3) - 1;
+      // Use getObjectBounds for proper handling of lines/wires (points array) vs boxes (x,y,width,height)
+      const bounds = this.getObjectBounds(obj);
+      const objX1 = bounds.x;
+      const objY1 = bounds.y;
+      const objX2 = bounds.x + bounds.width - 1;
+      const objY2 = bounds.y + bounds.height - 1;
 
       let selected = false;
 

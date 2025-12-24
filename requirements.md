@@ -73,6 +73,17 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 | [~] | **TOOL-28** | PinTool | I | Add pins to symbols |
 | [ ] | **TOOL-29** | DeleteTool | X | Delete objects and segments |
 
+### Box/Symbol Tool Interaction (TOOL-21, TOOL-24)
+
+Two-click creation workflow for rectangular objects (boxes and symbols):
+
+- [x] **TOOL-21A**: First click sets corner 1, tool remains active with preview
+- [x] **TOOL-21B**: Second click sets corner 2 and creates the object
+- [x] **TOOL-21C**: Escape before second click cancels creation (clears corner 1)
+- [x] **TOOL-21D**: Same location for both clicks does not create object (degenerate case)
+- [x] **TOOL-21E**: Preview rectangle shown between first click and cursor position
+- [x] **TOOL-21F**: Mouse can move freely between clicks (no drag required)
+
 ### Pin Tool (TOOL-28)
 
 - [~] **TOOL-28A**: Shows pin shape preview at cursor (●, ○, ■, □, etc.)

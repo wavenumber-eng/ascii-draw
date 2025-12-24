@@ -29,21 +29,16 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
 
   onMouseDown(event, context) {
     const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-    this.drawing = true;
-    this.startPos = { col, row };
-    this.currentPos = { col, row };
-    return true;
-  }
 
-  onMouseMove(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-    this.currentPos = { col, row };
-    return true; // Always redraw for crosshair
-  }
-
-  onMouseUp(event, context) {
-    if (this.drawing) {
-      const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // TOOL-21A/B: Two-click interaction
+    if (!this.drawing) {
+      // First click: set corner 1
+      this.drawing = true;
+      this.startPos = { col, row };
+      this.currentPos = { col, row };
+      return true;
+    } else {
+      // Second click: create the box
       this.currentPos = { col, row };
 
       // Calculate box bounds
@@ -52,7 +47,7 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
       const width = Math.abs(this.currentPos.col - this.startPos.col) + 1;
       const height = Math.abs(this.currentPos.row - this.startPos.row) + 1;
 
-      // OBJ-11: Minimum size 3x3
+      // OBJ-11: Minimum size 3x3 (also handles TOOL-21D: same location = degenerate)
       if (width >= 3 && height >= 3) {
         const state = context.history.getState();
         // TOOL-21: Create text box object
@@ -81,11 +76,29 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
       this.currentPos = null;
       return true;
     }
+  }
+
+  onMouseMove(event, context) {
+    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    this.currentPos = { col, row };
+    return true; // Always redraw for crosshair
+  }
+
+  onMouseUp(event, context) {
+    // TOOL-21F: Mouse can move freely between clicks (no drag required)
     return false;
   }
 
   // Allow typing when a box is selected while in box tool mode
   onKeyDown(event, context) {
+    // TOOL-21C: Escape before second click cancels creation
+    if (event.key === 'Escape' && this.drawing) {
+      this.drawing = false;
+      this.startPos = null;
+      this.currentPos = null;
+      return true;
+    }
+
     const state = context.history.getState();
 
     // If single box selected and printable key, start inline edit

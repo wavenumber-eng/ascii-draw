@@ -46,21 +46,16 @@ AsciiEditor.tools.SymbolTool = class SymbolTool extends AsciiEditor.tools.Tool {
 
   onMouseDown(event, context) {
     const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-    this.drawing = true;
-    this.startPos = { col, row };
-    this.currentPos = { col, row };
-    return true;
-  }
 
-  onMouseMove(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-    this.currentPos = { col, row };
-    return true; // Always redraw for crosshair
-  }
-
-  onMouseUp(event, context) {
-    if (this.drawing) {
-      const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // TOOL-21A/B: Two-click interaction (same as BoxTool)
+    if (!this.drawing) {
+      // First click: set corner 1
+      this.drawing = true;
+      this.startPos = { col, row };
+      this.currentPos = { col, row };
+      return true;
+    } else {
+      // Second click: create the symbol
       this.currentPos = { col, row };
 
       // Calculate symbol bounds
@@ -69,7 +64,7 @@ AsciiEditor.tools.SymbolTool = class SymbolTool extends AsciiEditor.tools.Tool {
       const width = Math.abs(this.currentPos.col - this.startPos.col) + 1;
       const height = Math.abs(this.currentPos.row - this.startPos.row) + 1;
 
-      // Minimum size 3x3 (same as box)
+      // Minimum size 3x3 (also handles degenerate case: same location)
       if (width >= 3 && height >= 3) {
         const state = context.history.getState();
         const page = state.project.pages.find(p => p.id === state.activePageId);
@@ -113,11 +108,29 @@ AsciiEditor.tools.SymbolTool = class SymbolTool extends AsciiEditor.tools.Tool {
       this.currentPos = null;
       return true;
     }
+  }
+
+  onMouseMove(event, context) {
+    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    this.currentPos = { col, row };
+    return true; // Always redraw for crosshair
+  }
+
+  onMouseUp(event, context) {
+    // TOOL-21F: Mouse can move freely between clicks (no drag required)
     return false;
   }
 
   // Allow typing when a symbol is selected while in symbol tool mode
   onKeyDown(event, context) {
+    // TOOL-21C: Escape before second click cancels creation
+    if (event.key === 'Escape' && this.drawing) {
+      this.drawing = false;
+      this.startPos = null;
+      this.currentPos = null;
+      return true;
+    }
+
     const state = context.history.getState();
 
     // If single symbol selected and printable key, start inline edit
