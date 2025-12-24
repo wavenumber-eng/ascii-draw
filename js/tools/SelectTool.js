@@ -53,6 +53,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     // Line segment dragging state
     this.lineSegmentIndex = null;     // Index of segment being dragged (segment between points i and i+1)
     this.lineSegmentIsHorizontal = null; // True if segment is horizontal
+    // Vertex drag indicator state (for visual feedback)
+    this.vertexDragIndicator = null;  // { type: 'bind'|'create', pos: {x,y}, pinId?, symbolId? }
+    // Segment drag pin movement state
+    this.segmentDragPinInfo = null;   // { symbolId, pinId, newEdge, newOffset, newPos }
+    this.segmentDragPinCollision = false; // True if moved pin would collide with another
     this.draggedIds = [];
     this.originalPositions = {};
     this.activeHandle = null;
@@ -92,6 +97,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.labelDragParamIndex = null;
     this.labelOriginalOffset = null;
     this.altKeyHeld = false;
+    // Clear drag indicators
+    this.vertexDragIndicator = null;
+    this.segmentDragPinInfo = null;
+    this.segmentDragPinCollision = false;
+    this.segmentDragOriginalPin = null;
   }
 
   onMouseDown(event, context) {
@@ -131,6 +141,37 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           this.lineSegmentIndex = handle.segmentIndex;
           this.lineSegmentIsHorizontal = handle.isHorizontal;
           this.lineOriginalPoints = handle.obj.points.map(p => ({ ...p }));
+
+          // Store original pin state if this is a wire with bound endpoint on this segment
+          this.segmentDragOriginalPin = null;
+          if (handle.obj.type === 'wire') {
+            const lastSegmentIndex = handle.obj.points.length - 2;
+            let binding = null;
+
+            if (handle.segmentIndex === 0 && handle.obj.startBinding) {
+              binding = handle.obj.startBinding;
+            } else if (handle.segmentIndex === lastSegmentIndex && handle.obj.endBinding) {
+              binding = handle.obj.endBinding;
+            }
+
+            if (binding) {
+              const pg = state.project.pages.find(p => p.id === state.activePageId);
+              if (pg) {
+                const symbol = pg.objects.find(o => o.id === binding.symbolId);
+                if (symbol && symbol.pins) {
+                  const pin = symbol.pins.find(p => p.id === binding.pinId);
+                  if (pin) {
+                    this.segmentDragOriginalPin = {
+                      symbolId: symbol.id,
+                      pinId: pin.id,
+                      edge: pin.edge,
+                      offset: pin.offset
+                    };
+                  }
+                }
+              }
+            }
+          }
           return true;
         } else if (handle.type === 'box_corner') {
           // Start resizing a box
@@ -821,6 +862,40 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     const origPoints = this.lineOriginalPoints;
     const numPoints = origPoints.length;
 
+    // Check for visual indicators on wire endpoints
+    this.vertexDragIndicator = null;
+    if (obj.type === 'wire') {
+      const isStartEndpoint = idx === 0;
+      const isEndEndpoint = idx === numPoints - 1;
+
+      if (isStartEndpoint || isEndEndpoint) {
+        const endpointPos = { x: col, y: row };
+
+        // Check if over existing pin
+        const pinAtPos = this.findPinAtPosition(endpointPos, page.objects);
+        if (pinAtPos) {
+          this.vertexDragIndicator = {
+            type: 'bind',
+            pos: endpointPos,
+            symbolId: pinAtPos.symbolId,
+            pinId: pinAtPos.pinId
+          };
+        } else {
+          // Check if over symbol edge (would create pin)
+          const edgeInfo = this.findSymbolEdge(endpointPos, page.objects);
+          if (edgeInfo) {
+            this.vertexDragIndicator = {
+              type: 'create',
+              pos: endpointPos,
+              symbolId: edgeInfo.symbol.id,
+              edge: edgeInfo.edge,
+              offset: edgeInfo.offset
+            };
+          }
+        }
+      }
+    }
+
     context.history.updateState(s => {
       const newState = AsciiEditor.core.deepClone(s);
       const pg = newState.project.pages.find(p => p.id === s.activePageId);
@@ -883,6 +958,24 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         return !curr || orig.x !== curr.x || orig.y !== curr.y;
       });
 
+    // OBJ-6L: Check if wire endpoint was dragged to another wire's floating endpoint (merge wires)
+    if (obj.type === 'wire' && hasChanged) {
+      const isStartEndpoint = this.linePointIndex === 0;
+      const isEndEndpoint = this.linePointIndex === this.lineOriginalPoints.length - 1;
+
+      if (isStartEndpoint || isEndEndpoint) {
+        const endpointPos = isStartEndpoint ? newPoints[0] : newPoints[newPoints.length - 1];
+
+        // Check if dropped on another wire's floating endpoint
+        const floatingEnd = this.findFloatingWireEnd(endpointPos, page.objects, obj.id);
+        if (floatingEnd) {
+          // Merge wires and return early
+          this.mergeWiresOnDrop(context, obj, isStartEndpoint, floatingEnd, origPoints);
+          return;
+        }
+      }
+    }
+
     // OBJ-69: Check if wire endpoint binding changed (broken or created)
     let bindingChanged = false;
     let bindingOldProps = {};
@@ -897,45 +990,31 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         const currentBinding = isStartEndpoint ? obj.startBinding : obj.endBinding;
         const bindingKey = isStartEndpoint ? 'startBinding' : 'endBinding';
 
-        // Check if endpoint was dragged away from its bound pin
-        if (this.lineOriginalBinding && currentBinding) {
-          const binding = this.lineOriginalBinding.binding;
-          const symbol = page.objects.find(o => o.id === binding.symbolId);
-          if (symbol && symbol.pins) {
-            const pin = symbol.pins.find(p => p.id === binding.pinId);
-            if (pin) {
-              const pinPos = this.getPinPosition(symbol, pin);
-              if (endpointPos.x !== pinPos.x || endpointPos.y !== pinPos.y) {
-                // Endpoint moved away - break binding
-                bindingChanged = true;
-                bindingOldProps[bindingKey] = currentBinding;
-                bindingNewProps[bindingKey] = null;
-              }
-            }
-          }
-        }
-
         // Check if endpoint was dragged TO a pin or symbol edge (create/rebind)
-        if (!bindingChanged) {
-          const bindResult = this.bindEndpointToPin(endpointPos, page, context);
-          if (bindResult) {
-            const newBinding = bindResult.binding;
-            // Check if this is a different binding than before
-            const hadBinding = currentBinding !== null;
-            const sameBinding = hadBinding &&
-              currentBinding.symbolId === newBinding.symbolId &&
-              currentBinding.pinId === newBinding.pinId;
+        // Always check this to handle both new bindings and rebindings (pin A to pin B)
+        const bindResult = this.bindEndpointToPin(endpointPos, page, context);
 
-            if (!sameBinding) {
-              bindingChanged = true;
-              bindingOldProps[bindingKey] = currentBinding;
-              bindingNewProps[bindingKey] = newBinding;
-              // Store pin creation command for later execution
-              if (bindResult.createPinCommand) {
-                this._pendingPinCreation = bindResult.createPinCommand;
-              }
+        if (bindResult) {
+          const newBinding = bindResult.binding;
+          // Check if this is a different binding than before
+          const sameBinding = currentBinding &&
+            currentBinding.symbolId === newBinding.symbolId &&
+            currentBinding.pinId === newBinding.pinId;
+
+          if (!sameBinding) {
+            bindingChanged = true;
+            bindingOldProps[bindingKey] = currentBinding;
+            bindingNewProps[bindingKey] = newBinding;
+            // Store pin creation command for later execution
+            if (bindResult.createPinCommand) {
+              this._pendingPinCreation = bindResult.createPinCommand;
             }
           }
+        } else if (currentBinding) {
+          // No pin at new location but we had a binding - break it
+          bindingChanged = true;
+          bindingOldProps[bindingKey] = currentBinding;
+          bindingNewProps[bindingKey] = null;
         }
       }
     }
@@ -1024,7 +1103,132 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     return result;
   }
 
+  /**
+   * OBJ-6L: Find if a point is at another wire's floating endpoint
+   * @param {Object} point - {x, y} position to check
+   * @param {Array} objects - page objects
+   * @param {string} excludeWireId - ID of wire to exclude (the one being dragged)
+   * @returns {Object|null} { wire, isStart, point } or null
+   */
+  findFloatingWireEnd(point, objects, excludeWireId) {
+    for (const obj of objects) {
+      if (obj.type !== 'wire' || !obj.points || obj.points.length < 2) continue;
+      if (obj.id === excludeWireId) continue;  // Don't match self
+
+      const start = obj.points[0];
+      const end = obj.points[obj.points.length - 1];
+
+      // Check start endpoint (floating if no startBinding)
+      if (!obj.startBinding && start.x === point.x && start.y === point.y) {
+        return { wire: obj, isStart: true, point: start };
+      }
+
+      // Check end endpoint (floating if no endBinding)
+      if (!obj.endBinding && end.x === point.x && end.y === point.y) {
+        return { wire: obj, isStart: false, point: end };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * OBJ-6L: Merge two wires when endpoint is dragged to another wire's floating endpoint
+   * @param {Object} context - tool context
+   * @param {Object} draggedWire - wire being dragged
+   * @param {boolean} draggedIsStart - whether we're dragging the start endpoint
+   * @param {Object} targetEnd - { wire, isStart } of the target wire's floating end
+   * @param {Array} origPoints - original points of dragged wire before drag
+   */
+  mergeWiresOnDrop(context, draggedWire, draggedIsStart, targetEnd, origPoints) {
+    const state = context.history.getState();
+    const targetWire = targetEnd.wire;
+
+    // First restore dragged wire to original state
+    context.history.updateState(s => {
+      const newState = AsciiEditor.core.deepClone(s);
+      const pg = newState.project.pages.find(p => p.id === s.activePageId);
+      if (pg) {
+        const wire = pg.objects.find(o => o.id === draggedWire.id);
+        if (wire) {
+          wire.points = origPoints.map(p => ({ x: p.x, y: p.y }));
+        }
+      }
+      return newState;
+    });
+
+    // Build merged points array
+    // Logic: connect dragged wire's endpoint to target wire's endpoint
+    let mergedPoints;
+    let mergedStartBinding;
+    let mergedEndBinding;
+
+    const draggedPoints = origPoints.map(p => ({ x: p.x, y: p.y }));
+    const targetPoints = targetWire.points.map(p => ({ x: p.x, y: p.y }));
+
+    if (draggedIsStart && targetEnd.isStart) {
+      // Dragged start → target start: reverse dragged, prepend to target
+      mergedPoints = [...draggedPoints.slice().reverse().slice(0, -1), ...targetPoints];
+      mergedStartBinding = draggedWire.endBinding;
+      mergedEndBinding = targetWire.endBinding;
+    } else if (draggedIsStart && !targetEnd.isStart) {
+      // Dragged start → target end: append dragged reversed to target
+      mergedPoints = [...targetPoints.slice(0, -1), ...draggedPoints.slice().reverse()];
+      mergedStartBinding = targetWire.startBinding;
+      mergedEndBinding = draggedWire.endBinding;
+    } else if (!draggedIsStart && targetEnd.isStart) {
+      // Dragged end → target start: append target to dragged
+      mergedPoints = [...draggedPoints.slice(0, -1), ...targetPoints];
+      mergedStartBinding = draggedWire.startBinding;
+      mergedEndBinding = targetWire.endBinding;
+    } else {
+      // Dragged end → target end: append target reversed to dragged
+      mergedPoints = [...draggedPoints.slice(0, -1), ...targetPoints.slice().reverse()];
+      mergedStartBinding = draggedWire.startBinding;
+      mergedEndBinding = targetWire.startBinding;
+    }
+
+    // Simplify merged points
+    mergedPoints = this.simplifyLinePoints(mergedPoints);
+
+    // Delete both original wires
+    context.history.execute(new AsciiEditor.core.DeleteObjectCommand(
+      state.activePageId, AsciiEditor.core.deepClone(draggedWire)
+    ));
+    context.history.execute(new AsciiEditor.core.DeleteObjectCommand(
+      state.activePageId, AsciiEditor.core.deepClone(targetWire)
+    ));
+
+    // Create merged wire (inherit style/net from dragged wire)
+    const mergedWire = {
+      id: AsciiEditor.core.generateId(),
+      type: 'wire',
+      points: mergedPoints,
+      style: draggedWire.style || 'single',
+      net: draggedWire.net || targetWire.net || '',
+      startBinding: mergedStartBinding,
+      endBinding: mergedEndBinding
+    };
+
+    context.history.execute(new AsciiEditor.core.CreateObjectCommand(
+      state.activePageId, mergedWire
+    ));
+
+    // Select the new merged wire
+    context.history.updateState(s => ({
+      ...s,
+      selection: { ids: [mergedWire.id], handles: null, pinIds: [], labelType: null, labelParamIndex: null }
+    }));
+
+    AsciiEditor.debug.info('SelectTool', 'Merged wires on drag', {
+      draggedId: draggedWire.id,
+      targetId: targetWire.id,
+      newId: mergedWire.id,
+      points: mergedPoints.length
+    });
+  }
+
   // OBJ-3D to OBJ-3G: Drag line segment (move both endpoints perpendicular to segment)
+  // For wires with bound endpoints: move the attached pin along the symbol edge
   performLineSegmentDrag(col, row, context) {
     const state = context.history.getState();
     const page = state.project.pages.find(p => p.id === state.activePageId);
@@ -1035,45 +1239,143 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     const segIdx = this.lineSegmentIndex;
     const origPoints = this.lineOriginalPoints;
+    const lastSegmentIndex = origPoints.length - 2;
+
+    // Reset segment drag pin state
+    this.segmentDragPinInfo = null;
+    this.segmentDragPinCollision = false;
 
     // Calculate delta from original segment position
+    let deltaX = 0, deltaY = 0;
     if (this.lineSegmentIsHorizontal) {
-      // Horizontal segment: only allow vertical movement (change Y)
-      const origY = origPoints[segIdx].y;
-      const deltaY = row - origY;
+      deltaY = row - origPoints[segIdx].y;
+    } else {
+      deltaX = col - origPoints[segIdx].x;
+    }
 
-      context.history.updateState(s => {
-        const newState = AsciiEditor.core.deepClone(s);
-        const pg = newState.project.pages.find(p => p.id === s.activePageId);
-        if (pg) {
-          const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
-          if (lineObj && lineObj.points) {
+    // For wires, check if this segment affects a bound endpoint and move the pin
+    if (obj.type === 'wire') {
+      let bindingToCheck = null;
+      let isStartEndpoint = false;
+
+      if (segIdx === 0 && obj.startBinding) {
+        bindingToCheck = obj.startBinding;
+        isStartEndpoint = true;
+      } else if (segIdx === lastSegmentIndex && obj.endBinding) {
+        bindingToCheck = obj.endBinding;
+        isStartEndpoint = false;
+      }
+
+      if (bindingToCheck) {
+        const symbol = page.objects.find(o => o.id === bindingToCheck.symbolId);
+        if (symbol && symbol.pins) {
+          const pin = symbol.pins.find(p => p.id === bindingToCheck.pinId);
+          if (pin) {
+            // Calculate new wire endpoint position
+            const endpointIdx = isStartEndpoint ? 0 : origPoints.length - 1;
+            const newEndpointX = origPoints[endpointIdx].x + deltaX;
+            const newEndpointY = origPoints[endpointIdx].y + deltaY;
+
+            // Calculate new pin position along the edge
+            const newEdgeInfo = this.calculatePinPositionOnEdge(symbol, pin.edge, newEndpointX, newEndpointY);
+
+            if (newEdgeInfo) {
+              // Check for collision with other pins on this symbol
+              const collision = this.checkPinCollision(symbol, pin.id, newEdgeInfo.edge, newEdgeInfo.offset);
+
+              // Use the original pin state stored when drag started
+              const origPin = this.segmentDragOriginalPin;
+              this.segmentDragPinInfo = {
+                symbolId: symbol.id,
+                pinId: pin.id,
+                originalEdge: origPin ? origPin.edge : pin.edge,
+                originalOffset: origPin ? origPin.offset : pin.offset,
+                newEdge: newEdgeInfo.edge,
+                newOffset: newEdgeInfo.offset,
+                newPos: { x: newEndpointX, y: newEndpointY }
+              };
+              this.segmentDragPinCollision = collision;
+            }
+          }
+        }
+      }
+    }
+
+    context.history.updateState(s => {
+      const newState = AsciiEditor.core.deepClone(s);
+      const pg = newState.project.pages.find(p => p.id === s.activePageId);
+      if (pg) {
+        const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
+        if (lineObj && lineObj.points) {
+          if (this.lineSegmentIsHorizontal) {
             // Move both endpoints of this segment by deltaY
             lineObj.points[segIdx].y = origPoints[segIdx].y + deltaY;
             lineObj.points[segIdx + 1].y = origPoints[segIdx + 1].y + deltaY;
-          }
-        }
-        return newState;
-      });
-    } else {
-      // Vertical segment: only allow horizontal movement (change X)
-      const origX = origPoints[segIdx].x;
-      const deltaX = col - origX;
-
-      context.history.updateState(s => {
-        const newState = AsciiEditor.core.deepClone(s);
-        const pg = newState.project.pages.find(p => p.id === s.activePageId);
-        if (pg) {
-          const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
-          if (lineObj && lineObj.points) {
+          } else {
             // Move both endpoints of this segment by deltaX
             lineObj.points[segIdx].x = origPoints[segIdx].x + deltaX;
             lineObj.points[segIdx + 1].x = origPoints[segIdx + 1].x + deltaX;
           }
         }
-        return newState;
-      });
+
+        // Move the pin in real-time if we have pin movement info
+        if (this.segmentDragPinInfo && !this.segmentDragPinCollision) {
+          const sym = pg.objects.find(o => o.id === this.segmentDragPinInfo.symbolId);
+          if (sym && sym.pins) {
+            const pinIdx = sym.pins.findIndex(p => p.id === this.segmentDragPinInfo.pinId);
+            if (pinIdx >= 0) {
+              sym.pins[pinIdx].edge = this.segmentDragPinInfo.newEdge;
+              sym.pins[pinIdx].offset = this.segmentDragPinInfo.newOffset;
+            }
+          }
+        }
+      }
+      return newState;
+    });
+  }
+
+  // Calculate where a pin should be on an edge given a target position
+  calculatePinPositionOnEdge(symbol, currentEdge, targetX, targetY) {
+    const { x, y, width, height } = symbol;
+
+    // For left/right edges, the Y position determines offset
+    // For top/bottom edges, the X position determines offset
+    if (currentEdge === 'left' || currentEdge === 'right') {
+      // Pin stays on same edge, Y determines offset
+      const clampedY = Math.max(y + 1, Math.min(y + height - 2, targetY));
+      const offset = height > 2 ? (clampedY - y) / (height - 1) : 0.5;
+      return { edge: currentEdge, offset };
+    } else if (currentEdge === 'top' || currentEdge === 'bottom') {
+      // Pin stays on same edge, X determines offset
+      const clampedX = Math.max(x + 1, Math.min(x + width - 2, targetX));
+      const offset = width > 2 ? (clampedX - x) / (width - 1) : 0.5;
+      return { edge: currentEdge, offset };
     }
+
+    return null;
+  }
+
+  // Check if a pin at the given edge/offset would collide with another pin
+  checkPinCollision(symbol, excludePinId, edge, offset) {
+    if (!symbol.pins) return false;
+
+    const { width, height } = symbol;
+    const edgeLength = (edge === 'left' || edge === 'right') ? height : width;
+
+    // Calculate the cell position of the new offset
+    const newCell = Math.round(offset * (edgeLength - 1));
+
+    for (const otherPin of symbol.pins) {
+      if (otherPin.id === excludePinId) continue;
+      if (otherPin.edge !== edge) continue;
+
+      const otherCell = Math.round(otherPin.offset * (edgeLength - 1));
+      if (newCell === otherCell) {
+        return true; // Collision!
+      }
+    }
+
+    return false;
   }
 
   finalizeLineSegmentDrag(context) {
@@ -1085,6 +1387,39 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (!obj || (obj.type !== 'line' && obj.type !== 'wire') || !obj.points) return;
 
     const origPoints = this.lineOriginalPoints;
+
+    // If there's a pin collision, reject the drag entirely
+    if (this.segmentDragPinCollision) {
+      // Revert to original state
+      context.history.updateState(s => {
+        const newState = AsciiEditor.core.deepClone(s);
+        const pg = newState.project.pages.find(p => p.id === s.activePageId);
+        if (pg) {
+          const lineObj = pg.objects.find(o => o.id === s.selection.ids[0]);
+          if (lineObj) {
+            lineObj.points = origPoints.map(p => ({ ...p }));
+          }
+          // Restore pin to original position using the stored original from drag start
+          if (this.segmentDragOriginalPin) {
+            const sym = pg.objects.find(o => o.id === this.segmentDragOriginalPin.symbolId);
+            if (sym && sym.pins) {
+              const pinIdx = sym.pins.findIndex(p => p.id === this.segmentDragOriginalPin.pinId);
+              if (pinIdx >= 0) {
+                sym.pins[pinIdx].edge = this.segmentDragOriginalPin.edge;
+                sym.pins[pinIdx].offset = this.segmentDragOriginalPin.offset;
+              }
+            }
+          }
+        }
+        return newState;
+      });
+      // Clear state and return without committing
+      this.segmentDragPinInfo = null;
+      this.segmentDragPinCollision = false;
+      this.segmentDragOriginalPin = null;
+      return;
+    }
+
     // Simplify points to remove duplicates and collinear points
     const newPoints = this.simplifyLinePoints(obj.points.map(p => ({ ...p })));
 
@@ -1095,8 +1430,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
         return !curr || orig.x !== curr.x || orig.y !== curr.y;
       });
 
-    if (hasChanged) {
-      // Restore original
+    // Check if we moved a pin
+    const pinMoved = this.segmentDragPinInfo && !this.segmentDragPinCollision;
+
+    if (hasChanged || pinMoved) {
+      // Restore original state before executing commands
       context.history.updateState(s => {
         const newState = AsciiEditor.core.deepClone(s);
         const pg = newState.project.pages.find(p => p.id === s.activePageId);
@@ -1105,18 +1443,61 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           if (lineObj) {
             lineObj.points = origPoints.map(p => ({ ...p }));
           }
+          // Restore pin to original position using stored original from drag start
+          if (this.segmentDragOriginalPin) {
+            const sym = pg.objects.find(o => o.id === this.segmentDragOriginalPin.symbolId);
+            if (sym && sym.pins) {
+              const pinIdx = sym.pins.findIndex(p => p.id === this.segmentDragOriginalPin.pinId);
+              if (pinIdx >= 0) {
+                sym.pins[pinIdx].edge = this.segmentDragOriginalPin.edge;
+                sym.pins[pinIdx].offset = this.segmentDragOriginalPin.offset;
+              }
+            }
+          }
         }
         return newState;
       });
 
-      // Execute command for undo/redo
-      context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
-        state.activePageId,
-        obj.id,
-        { points: origPoints },
-        { points: newPoints }
-      ));
+      // Execute wire points change
+      if (hasChanged) {
+        context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+          state.activePageId,
+          obj.id,
+          { points: origPoints },
+          { points: newPoints }
+        ));
+      }
+
+      // Execute pin position change
+      if (pinMoved) {
+        const symbol = page.objects.find(o => o.id === this.segmentDragPinInfo.symbolId);
+        if (symbol && symbol.pins) {
+          const oldPins = symbol.pins.map(p => ({ ...p }));
+          const newPins = symbol.pins.map(p => {
+            if (p.id === this.segmentDragPinInfo.pinId) {
+              return {
+                ...p,
+                edge: this.segmentDragPinInfo.newEdge,
+                offset: this.segmentDragPinInfo.newOffset
+              };
+            }
+            return { ...p };
+          });
+
+          context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+            state.activePageId,
+            symbol.id,
+            { pins: oldPins },
+            { pins: newPins }
+          ));
+        }
+      }
     }
+
+    // Clear segment drag pin state
+    this.segmentDragPinInfo = null;
+    this.segmentDragPinCollision = false;
+    this.segmentDragOriginalPin = null;
   }
 
   // SEL-1 to SEL-4: Marquee selection
@@ -1627,7 +2008,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     const edgeInfo = this.findClosestEdge(symbol, col, row);
     if (!edgeInfo) return;
 
-    // Update the pin's position
+    // Update the pin's position and any bound wire endpoints
     context.history.updateState(s => {
       const newState = AsciiEditor.core.deepClone(s);
       const pg = newState.project.pages.find(p => p.id === s.activePageId);
@@ -1638,6 +2019,48 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
           if (pinIdx >= 0) {
             sym.pins[pinIdx].edge = edgeInfo.edge;
             sym.pins[pinIdx].offset = edgeInfo.offset;
+
+            // Calculate new pin position for wire updates
+            const updatedPin = sym.pins[pinIdx];
+            const newPinPos = this.getPinPosition(sym, updatedPin);
+
+            // Update any wires bound to this pin
+            pg.objects.forEach(obj => {
+              if (obj.type !== 'wire' || !obj.points || obj.points.length < 2) return;
+
+              // Check start binding
+              if (obj.startBinding?.symbolId === this.pinDragSymbolId &&
+                  obj.startBinding?.pinId === this.pinDragPinId) {
+                obj.points[0].x = newPinPos.x;
+                obj.points[0].y = newPinPos.y;
+                // Adjust adjacent point for orthogonality if wire has intermediate points
+                if (obj.points.length >= 3) {
+                  const exitHorizontal = (updatedPin.edge === 'left' || updatedPin.edge === 'right');
+                  if (exitHorizontal) {
+                    obj.points[1].y = newPinPos.y;
+                  } else {
+                    obj.points[1].x = newPinPos.x;
+                  }
+                }
+              }
+
+              // Check end binding
+              if (obj.endBinding?.symbolId === this.pinDragSymbolId &&
+                  obj.endBinding?.pinId === this.pinDragPinId) {
+                const lastIdx = obj.points.length - 1;
+                obj.points[lastIdx].x = newPinPos.x;
+                obj.points[lastIdx].y = newPinPos.y;
+                // Adjust adjacent point for orthogonality if wire has intermediate points
+                if (obj.points.length >= 3) {
+                  const entryHorizontal = (updatedPin.edge === 'left' || updatedPin.edge === 'right');
+                  if (entryHorizontal) {
+                    obj.points[lastIdx - 1].y = newPinPos.y;
+                  } else {
+                    obj.points[lastIdx - 1].x = newPinPos.x;
+                  }
+                }
+              }
+            });
           }
         }
       }
@@ -1965,6 +2388,71 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       ctx.fillRect(x1, y1, w, h);
       ctx.strokeRect(x1, y1, w, h);
       ctx.setLineDash([]);
+    }
+
+    // Draw vertex drag indicator (bind pin / create pin)
+    if (this.mode === SelectMode.LINE_POINT && this.vertexDragIndicator) {
+      const indicator = this.vertexDragIndicator;
+      const pixel = context.grid.charToPixel(indicator.pos.x, indicator.pos.y);
+      const centerX = pixel.x + context.grid.charWidth / 2;
+      const centerY = pixel.y + context.grid.charHeight / 2;
+
+      // Draw indicator circle/box
+      ctx.lineWidth = 2;
+      if (indicator.type === 'bind') {
+        // Bind to existing pin - green indicator
+        ctx.strokeStyle = '#00cc66';
+        ctx.fillStyle = 'rgba(0, 204, 102, 0.3)';
+      } else {
+        // Create new pin - blue indicator
+        ctx.strokeStyle = '#007acc';
+        ctx.fillStyle = 'rgba(0, 122, 204, 0.3)';
+      }
+
+      // Draw highlight around the cell
+      ctx.fillRect(pixel.x - 2, pixel.y - 2, context.grid.charWidth + 4, context.grid.charHeight + 4);
+      ctx.strokeRect(pixel.x - 2, pixel.y - 2, context.grid.charWidth + 4, context.grid.charHeight + 4);
+
+      // Draw label
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = indicator.type === 'bind' ? '#00cc66' : '#007acc';
+      const label = indicator.type === 'bind' ? 'BIND PIN' : 'CREATE PIN';
+      const labelWidth = ctx.measureText(label).width;
+      ctx.fillText(label, centerX - labelWidth / 2, pixel.y - 6);
+    }
+
+    // Draw segment drag collision error indicator
+    if (this.mode === SelectMode.LINE_SEGMENT && this.segmentDragPinCollision && this.segmentDragPinInfo) {
+      const pinInfo = this.segmentDragPinInfo;
+      const pixel = context.grid.charToPixel(pinInfo.newPos.x, pinInfo.newPos.y);
+
+      // Red error indicator
+      ctx.strokeStyle = '#ff4444';
+      ctx.fillStyle = 'rgba(255, 68, 68, 0.3)';
+      ctx.lineWidth = 2;
+
+      // Draw X mark
+      const size = Math.min(context.grid.charWidth, context.grid.charHeight) * 0.6;
+      const centerX = pixel.x + context.grid.charWidth / 2;
+      const centerY = pixel.y + context.grid.charHeight / 2;
+
+      ctx.fillRect(pixel.x - 2, pixel.y - 2, context.grid.charWidth + 4, context.grid.charHeight + 4);
+      ctx.strokeRect(pixel.x - 2, pixel.y - 2, context.grid.charWidth + 4, context.grid.charHeight + 4);
+
+      // Draw X
+      ctx.beginPath();
+      ctx.moveTo(centerX - size / 2, centerY - size / 2);
+      ctx.lineTo(centerX + size / 2, centerY + size / 2);
+      ctx.moveTo(centerX + size / 2, centerY - size / 2);
+      ctx.lineTo(centerX - size / 2, centerY + size / 2);
+      ctx.stroke();
+
+      // Draw error label
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#ff4444';
+      const label = 'PIN COLLISION';
+      const labelWidth = ctx.measureText(label).width;
+      ctx.fillText(label, centerX - labelWidth / 2, pixel.y - 6);
     }
 
     // Get selection styling from CSS variables

@@ -368,6 +368,17 @@ Wire endpoints can bind to symbol pins. When a symbol moves, bound wire endpoint
 - [ ] **OBJ-68**: Modifier key (Alt) breaks binding during move
 - [ ] **OBJ-69**: Drag wire endpoint away from pin → breaks binding
 
+#### Floating Wire Ends (No-Connect / ERC)
+
+Unbound wire endpoints are "floating" and indicate potential ERC errors. Users can extend or join wires at floating ends.
+
+- [ ] **OBJ-6F**: Floating wire end renders as "X" to indicate no-connect/ERC error
+- [ ] **OBJ-6G**: Hover over floating end with WireTool → shows "connect" overlay
+- [ ] **OBJ-6H**: Start wire FROM floating end → extends existing wire, inherits style/netname
+- [ ] **OBJ-6I**: End wire ON floating end → joins wires into one, new wire's style/netname wins
+- [ ] **OBJ-6J**: When wires joined, old endpoint optimized out if collinear
+- [ ] **OBJ-6K**: Joining wires does NOT create junction (direct merge)
+
 #### Wire Data Structure
 
 ```javascript
@@ -860,3 +871,126 @@ npm test -- export    # Run only export tests
 - [x] **TEST-30**: `test/test-export.html` for interactive browser testing
 - [x] **TEST-31**: Visual diff comparison for export output
 - [x] **TEST-32**: Character-by-character analysis for debugging
+
+---
+
+## 14. Architecture
+
+### Clean Separation: Tools → State → Derive → Render
+
+The architecture cleanly separates tool interactions from rendering by introducing a derived object computation layer. After any state change, derived objects (junctions, no-connects, etc.) are computed and combined with primary objects to form a render state.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         TOOL LAYER                              │
+│  SelectTool, WireTool, SymbolTool, etc.                        │
+│  - Handle user input (mouse, keyboard)                          │
+│  - Modify primary objects via commands                          │
+│  - NO rendering logic, NO derived object knowledge              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ executes commands
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      PRIMARY STATE                              │
+│  page.objects[] - User-authored objects only                    │
+│  - box, symbol, line, wire, text                                │
+│  - Persisted to file                                            │
+│  - Managed by undo/redo                                         │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ triggers (after every state change)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     DERIVE PASS                                 │
+│  DerivedStateComputer.compute(page.objects) → derivedObjects[]  │
+│  Computes:                                                      │
+│  - Line junctions (where lines cross/meet)                      │
+│  - Wire junctions (electrical connection points)                │
+│  - Wire no-connects (floating endpoints)                        │
+│  - Future: net labels, bus taps, etc.                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ produces
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     RENDER STATE                                │
+│  {                                                              │
+│    primaryObjects: [...],   // reference to page.objects        │
+│    derivedObjects: [...],   // computed junctions, no-connects  │
+│    renderList: [...]        // sorted, ready for rendering      │
+│  }                                                              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ fed to
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     RENDER LAYER                                │
+│  Renderer.render(renderState)                                   │
+│  - Iterates renderList in order                                 │
+│  - Calls drawObject() for each - NO special cases               │
+│  - Backend-agnostic (ASCII, SVG, Canvas)                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Architecture Requirements
+
+- [ ] **ARCH-20**: Tool layer handles user input only, no rendering logic
+- [ ] **ARCH-21**: Tools modify primary objects via commands (undo/redo compatible)
+- [ ] **ARCH-22**: Primary state contains only user-authored objects
+- [ ] **ARCH-23**: Derive pass triggered after every state change
+- [ ] **ARCH-24**: Derived objects computed fresh each time (not persisted in memory)
+- [ ] **ARCH-25**: Render layer iterates render list without special-case logic
+- [ ] **ARCH-26**: All object types (primary and derived) rendered through single code path
+
+### Derived Objects Storage (Hybrid Approach)
+
+- [ ] **ARCH-30**: Runtime: derived objects are ephemeral, computed fresh after every state change
+- [ ] **ARCH-31**: Save: include derived objects in file (marked `derived: true`) for debugging/inspection
+- [ ] **ARCH-32**: Load: ignore saved derived objects, recompute from primary objects
+- [ ] **ARCH-33**: This provides debugging benefits with no runtime impact
+
+### Derived Object Types
+
+| Type | Source | Visual | Description |
+|------|--------|--------|-------------|
+| `junction` | Lines meeting/crossing | ●, ■, █ | Visual line intersection marker |
+| `wire-junction` | Wire endpoint on wire segment | ● (accent) | Electrical connection point |
+| `wire-noconnect` | Unbound wire endpoint | X (black) | Floating endpoint / ERC indicator |
+
+#### Floating Wire Ends (No-Connect / ERC)
+
+- [ ] **OBJ-6F**: Floating wire end renders as "X" to indicate no-connect/ERC error
+- [ ] **OBJ-6G**: Hover over floating end with WireTool → shows "connect" overlay
+- [ ] **OBJ-6H**: Start wire FROM floating end → extends existing wire, inherits style/netname
+- [ ] **OBJ-6I**: End wire ON floating end → joins wires into one, new wire's style/netname wins
+- [ ] **OBJ-6J**: When wires joined, old endpoint optimized out if collinear
+- [ ] **OBJ-6K**: Joining wires does NOT create junction (direct merge)
+
+### Render Order (Z-Index)
+
+Objects rendered in this order (lowest to highest):
+
+| Order | Type | Description |
+|-------|------|-------------|
+| 10 | Grid | Background grid |
+| 20 | line | Visual lines |
+| 25 | junction | Line junction markers |
+| 30 | wire | Electrical wires |
+| 35 | wire-junction | Wire connection points |
+| 36 | wire-noconnect | Floating endpoint markers |
+| 40 | box | Text boxes |
+| 50 | symbol | Schematic symbols (includes pins) |
+| 60 | text | Standalone text |
+| 70 | labels | Designators, parameters, net labels |
+| 100 | overlay | Tool previews, selection |
+
+### DerivedStateComputer
+
+- [ ] **ARCH-40**: `DerivedStateComputer` class in `js/core/DerivedStateComputer.js`
+- [ ] **ARCH-41**: Method: `compute(objects)` returns `{ derivedObjects, renderList }`
+- [ ] **ARCH-42**: Method: `computeLineJunctions(lines)` → junction objects
+- [ ] **ARCH-43**: Method: `computeWireJunctions(wires)` → wire-junction objects
+- [ ] **ARCH-44**: Method: `computeWireNoConnects(wires)` → wire-noconnect objects
+- [ ] **ARCH-45**: Method: `buildRenderList(primary, derived)` → sorted by render order
+- [ ] **ARCH-46**: Integration: derive pass triggered after `execute()`, `undo()`, `redo()`

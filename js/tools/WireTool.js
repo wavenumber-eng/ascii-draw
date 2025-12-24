@@ -18,6 +18,10 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
     this.styleIndex = 0;
     this.netName = '';  // Wire-specific: net label
 
+    // OBJ-6H: Extending from floating end - stores wire being extended
+    this.extendingWire = null;      // { wireId, isStart } - which wire and which end
+    this.extendingWireOriginal = null; // Original wire state for undo
+
     // Reference shared utilities
     this.lineUtils = AsciiEditor.core.lineUtils;
     this.styles = this.lineUtils.styles;
@@ -51,17 +55,12 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
   }
 
   activate(context) {
-    this.drawing = false;
-    this.points = [];
-    this.currentPos = null;
-    this.hFirst = true;
+    this.resetToolState();
     context.canvas.style.cursor = this.cursor;
   }
 
   deactivate() {
-    this.drawing = false;
-    this.points = [];
-    this.currentPos = null;
+    this.resetToolState();
   }
 
   /**
@@ -86,10 +85,43 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
     const clickPos = { x: col, y: row };
 
     if (!this.drawing) {
-      // First point - check if starting on a symbol edge and set posture for clean exit
+      // First point - check various starting scenarios
       const state = context.history.getState();
       const page = state.project.pages.find(p => p.id === state.activePageId);
+
       if (page) {
+        // OBJ-6H: Check if starting from a floating wire end
+        const floatingEnd = this.findFloatingWireEnd(clickPos, page.objects);
+        if (floatingEnd) {
+          // Start extending this wire - inherit its style and net
+          this.extendingWire = { wireId: floatingEnd.wire.id, isStart: floatingEnd.isStart };
+          this.extendingWireOriginal = JSON.parse(JSON.stringify(floatingEnd.wire));
+
+          // Inherit style and net from existing wire
+          this.style = floatingEnd.wire.style || 'single';
+          this.netName = floatingEnd.wire.net || '';
+
+          // Set posture based on wire direction at the floating end
+          const wirePoints = floatingEnd.wire.points;
+          if (floatingEnd.isStart && wirePoints.length >= 2) {
+            // Extending from start - look at direction to second point
+            const p0 = wirePoints[0];
+            const p1 = wirePoints[1];
+            this.hFirst = (p0.y === p1.y); // horizontal if first segment is horizontal
+          } else if (!floatingEnd.isStart && wirePoints.length >= 2) {
+            // Extending from end - look at direction from second-to-last
+            const pLast = wirePoints[wirePoints.length - 1];
+            const pPrev = wirePoints[wirePoints.length - 2];
+            this.hFirst = (pLast.y === pPrev.y);
+          }
+
+          this.points.push(clickPos);
+          this.drawing = true;
+          this.currentPos = clickPos;
+          return true;
+        }
+
+        // Check if starting on a symbol edge and set posture for clean exit
         const edgeInfo = this.findSymbolEdge(clickPos, page.objects);
         if (edgeInfo) {
           // Set posture based on pin edge for clean exit
@@ -114,7 +146,17 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
       const state = context.history.getState();
       const page = state.project.pages.find(p => p.id === state.activePageId);
       if (page) {
-        // Auto-finish on wire hit
+        // OBJ-6I: Check if ending on a floating wire end (join wires)
+        const floatingEnd = this.findFloatingWireEnd(clickPos, page.objects);
+        if (floatingEnd) {
+          // Don't join to the same wire we're extending from
+          if (!this.extendingWire || this.extendingWire.wireId !== floatingEnd.wire.id) {
+            this.finishWireWithJoin(context, floatingEnd);
+            return true;
+          }
+        }
+
+        // Auto-finish on wire hit (creates junction)
         const wireHits = this.findWiresAtPoint(clickPos, page.objects);
         if (wireHits.length > 0) {
           this.finishWire(context);
@@ -213,6 +255,30 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
       }
     }
     return results;
+  }
+
+  /**
+   * OBJ-6G: Find floating (unbound) wire endpoints at a given point
+   * Returns { wire, isStart, point } or null
+   */
+  findFloatingWireEnd(point, objects) {
+    for (const obj of objects) {
+      if (obj.type !== 'wire' || !obj.points || obj.points.length < 2) continue;
+
+      const start = obj.points[0];
+      const end = obj.points[obj.points.length - 1];
+
+      // Check start endpoint (floating if no startBinding)
+      if (!obj.startBinding && start.x === point.x && start.y === point.y) {
+        return { wire: obj, isStart: true, point: start };
+      }
+
+      // Check end endpoint (floating if no endBinding)
+      if (!obj.endBinding && end.x === point.x && end.y === point.y) {
+        return { wire: obj, isStart: false, point: end };
+      }
+    }
+    return null;
   }
 
   /**
@@ -341,6 +407,12 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
       return;
     }
 
+    // OBJ-6H: Handle extending an existing wire
+    if (this.extendingWire) {
+      this.finishWireExtend(context, simplifiedPoints);
+      return;
+    }
+
     // OBJ-65 to OBJ-69: Check for pin bindings at endpoints
     const startPoint = simplifiedPoints[0];
     const endPoint = simplifiedPoints[simplifiedPoints.length - 1];
@@ -370,11 +442,7 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
     }));
 
     // Reset tool state
-    this.drawing = false;
-    this.points = [];
-    this.currentPos = null;
-    this.hFirst = true;
-    // Don't reset netName - keep it for subsequent wires
+    this.resetToolState();
 
     // Switch to select tool
     if (context.setTool) {
@@ -382,11 +450,210 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
     }
   }
 
-  cancelWire() {
+  /**
+   * OBJ-6H: Finish extending an existing wire from its floating end
+   * The new segment inherits style/net from the existing wire
+   */
+  finishWireExtend(context, newPoints) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const existingWire = page.objects.find(o => o.id === this.extendingWire.wireId);
+    if (!existingWire) {
+      this.cancelWire();
+      return;
+    }
+
+    // Build merged points
+    let mergedPoints;
+    if (this.extendingWire.isStart) {
+      // Extending from start - new points go at the beginning, reversed
+      // newPoints[0] is the floating end, newPoints[last] is where we extended to
+      const reversed = newPoints.slice().reverse();
+      // Skip the first point of existing (it's the same as last of reversed)
+      mergedPoints = [...reversed.slice(0, -1), ...existingWire.points];
+    } else {
+      // Extending from end - new points go at the end
+      // newPoints[0] is the floating end, newPoints[last] is where we extended to
+      // Skip the first point of newPoints (it's the same as last of existing)
+      mergedPoints = [...existingWire.points, ...newPoints.slice(1)];
+    }
+
+    // OBJ-6J: Simplify to remove collinear points including old floating endpoint
+    mergedPoints = this.lineUtils.simplifyPoints(mergedPoints);
+
+    // Check for binding at the new endpoint
+    const newEndpoint = this.extendingWire.isStart ? mergedPoints[0] : mergedPoints[mergedPoints.length - 1];
+    const newBinding = this.bindEndpointToPin(newEndpoint, context);
+
+    // Build old and new props for the modify command
+    const oldProps = {
+      points: existingWire.points.map(p => ({ ...p })),
+      startBinding: existingWire.startBinding,
+      endBinding: existingWire.endBinding
+    };
+
+    const newProps = {
+      points: mergedPoints.map(p => ({ x: p.x, y: p.y }))
+    };
+
+    // Update the appropriate binding
+    if (this.extendingWire.isStart) {
+      newProps.startBinding = newBinding;
+      newProps.endBinding = existingWire.endBinding;
+    } else {
+      newProps.startBinding = existingWire.startBinding;
+      newProps.endBinding = newBinding;
+    }
+
+    context.history.execute(new AsciiEditor.core.ModifyObjectCommand(
+      state.activePageId,
+      existingWire.id,
+      oldProps,
+      newProps
+    ));
+
+    // Select the extended wire
+    context.history.updateState(s => ({
+      ...s,
+      selection: { ids: [existingWire.id], handles: null }
+    }));
+
+    this.resetToolState();
+
+    if (context.setTool) {
+      context.setTool('select');
+    }
+  }
+
+  /**
+   * OBJ-6I, OBJ-6K: Join wires when ending on a floating endpoint
+   * The target wire gets merged into the new wire (new wire's style/net wins)
+   */
+  finishWireWithJoin(context, floatingEnd) {
+    const state = context.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const targetWire = floatingEnd.wire;
+    const simplifiedNewPoints = this.lineUtils.simplifyPoints(this.points);
+
+    if (simplifiedNewPoints.length < 2) {
+      this.cancelWire();
+      return;
+    }
+
+    // Build merged points array
+    let mergedPoints;
+    let mergedStartBinding;
+    let mergedEndBinding;
+
+    if (this.extendingWire) {
+      // We're extending one wire and joining to another - merge all three
+      const sourceWire = page.objects.find(o => o.id === this.extendingWire.wireId);
+      if (!sourceWire) {
+        this.cancelWire();
+        return;
+      }
+
+      // Complex merge: sourceWire + newPoints + targetWire
+      if (this.extendingWire.isStart) {
+        // Source wire's floating start → newPoints → target wire's floating end
+        const reversedNew = simplifiedNewPoints.slice().reverse();
+        if (floatingEnd.isStart) {
+          // target start → ... → source end
+          mergedPoints = [...targetWire.points.slice().reverse(), ...reversedNew.slice(1, -1), ...sourceWire.points];
+          mergedStartBinding = targetWire.endBinding;
+          mergedEndBinding = sourceWire.endBinding;
+        } else {
+          // source start ← ... ← target end
+          mergedPoints = [...reversedNew.slice(0, -1), ...sourceWire.points.slice(1), ...targetWire.points.slice(1)];
+          mergedStartBinding = sourceWire.startBinding;
+          mergedEndBinding = targetWire.endBinding;
+        }
+      } else {
+        // Source wire's floating end → newPoints → target wire
+        if (floatingEnd.isStart) {
+          // source → newPoints → target (reversed)
+          mergedPoints = [...sourceWire.points, ...simplifiedNewPoints.slice(1, -1), ...targetWire.points];
+          mergedStartBinding = sourceWire.startBinding;
+          mergedEndBinding = targetWire.endBinding;
+        } else {
+          // source → newPoints → target end (target reversed)
+          mergedPoints = [...sourceWire.points, ...simplifiedNewPoints.slice(1, -1), ...targetWire.points.slice().reverse()];
+          mergedStartBinding = sourceWire.startBinding;
+          mergedEndBinding = targetWire.startBinding;
+        }
+      }
+
+      // Delete both old wires
+      context.history.execute(new AsciiEditor.core.DeleteObjectCommand(state.activePageId, sourceWire));
+      context.history.execute(new AsciiEditor.core.DeleteObjectCommand(state.activePageId, targetWire));
+
+    } else {
+      // Simple case: new wire joins to floating end of target
+      if (floatingEnd.isStart) {
+        // New wire ends at target's start - prepend new wire
+        mergedPoints = [...simplifiedNewPoints.slice(0, -1), ...targetWire.points];
+        // Check binding at new wire's start
+        mergedStartBinding = this.bindEndpointToPin(simplifiedNewPoints[0], context);
+        mergedEndBinding = targetWire.endBinding;
+      } else {
+        // New wire ends at target's end - append target wire reversed
+        mergedPoints = [...simplifiedNewPoints.slice(0, -1), ...targetWire.points.slice().reverse()];
+        mergedStartBinding = this.bindEndpointToPin(simplifiedNewPoints[0], context);
+        mergedEndBinding = targetWire.startBinding;
+      }
+
+      // Delete the target wire
+      context.history.execute(new AsciiEditor.core.DeleteObjectCommand(state.activePageId, targetWire));
+    }
+
+    // OBJ-6J: Simplify merged points to remove collinear vertices
+    mergedPoints = this.lineUtils.simplifyPoints(mergedPoints);
+
+    // Create the merged wire with new wire's style/net (OBJ-6I)
+    const mergedWire = {
+      id: AsciiEditor.core.generateId(),
+      type: 'wire',
+      points: mergedPoints.map(p => ({ x: p.x, y: p.y })),
+      style: this.style,  // New wire's style wins
+      net: this.netName,  // New wire's net wins
+      startBinding: mergedStartBinding,
+      endBinding: mergedEndBinding
+    };
+
+    context.history.execute(new AsciiEditor.core.CreateObjectCommand(state.activePageId, mergedWire));
+
+    // Select the merged wire
+    context.history.updateState(s => ({
+      ...s,
+      selection: { ids: [mergedWire.id], handles: null }
+    }));
+
+    this.resetToolState();
+
+    if (context.setTool) {
+      context.setTool('select');
+    }
+  }
+
+  /**
+   * Reset tool state to initial
+   */
+  resetToolState() {
     this.drawing = false;
     this.points = [];
     this.currentPos = null;
     this.hFirst = true;
+    this.extendingWire = null;
+    this.extendingWireOriginal = null;
+    // Don't reset netName - keep it for subsequent wires
+  }
+
+  cancelWire() {
+    this.resetToolState();
   }
 
   drawLineSegments(ctx, points, chars, grid, color) {
@@ -410,31 +677,70 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
     const page = state.project.pages.find(p => p.id === state.activePageId);
     const objects = page ? page.objects : [];
 
-    // Detect hover targets - wire connections and symbol edges
+    // Detect hover targets - wire connections, floating ends, and symbol edges
     let wireHoverTarget = null;
     let pinHoverTarget = null;
+    let floatingEndTarget = null;
 
     if (this.currentPos) {
-      // Check for wire connection
-      const wireHits = this.findWiresAtPoint(this.currentPos, objects);
-      if (wireHits.length > 0) {
-        wireHoverTarget = { point: this.currentPos };
+      // OBJ-6G: Check for floating wire end first (highest priority)
+      const floatingEnd = this.findFloatingWireEnd(this.currentPos, objects);
+      if (floatingEnd) {
+        // Don't show connect for the wire we're currently extending from
+        if (!this.extendingWire || this.extendingWire.wireId !== floatingEnd.wire.id) {
+          floatingEndTarget = { point: this.currentPos, wire: floatingEnd.wire };
+        }
+      }
+
+      // Check for wire connection (mid-wire, creates junction)
+      if (!floatingEndTarget) {
+        const wireHits = this.findWiresAtPoint(this.currentPos, objects);
+        if (wireHits.length > 0) {
+          wireHoverTarget = { point: this.currentPos };
+        }
       }
 
       // Check for symbol edge (pin creation)
-      const edgeInfo = this.findSymbolEdge(this.currentPos, objects);
-      if (edgeInfo) {
-        // Check if pin already exists at this location
-        const existingPin = this.findPinAtEdge(edgeInfo.symbol, edgeInfo.edge, edgeInfo.offset);
-        pinHoverTarget = {
-          point: this.currentPos,
-          hasExistingPin: !!existingPin,
-          symbol: edgeInfo.symbol
-        };
+      if (!floatingEndTarget && !wireHoverTarget) {
+        const edgeInfo = this.findSymbolEdge(this.currentPos, objects);
+        if (edgeInfo) {
+          // Check if pin already exists at this location
+          const existingPin = this.findPinAtEdge(edgeInfo.symbol, edgeInfo.edge, edgeInfo.offset);
+          pinHoverTarget = {
+            point: this.currentPos,
+            hasExistingPin: !!existingPin,
+            symbol: edgeInfo.symbol
+          };
+        }
       }
     }
 
-    // Draw wire connection indicator
+    // OBJ-6G: Draw floating wire end indicator (CONNECT - joins wires)
+    if (floatingEndTarget) {
+      const pixel = grid.charToPixel(floatingEndTarget.point.x, floatingEndTarget.point.y);
+      const cx = pixel.x + offsetX;
+      const cy = pixel.y + offsetY;
+
+      // Green connect indicator
+      ctx.strokeStyle = accentSecondary;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(0, 170, 102, 0.4)';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = accentSecondary;
+      const label = this.drawing ? 'JOIN WIRE' : 'EXTEND WIRE';
+      ctx.fillText(label, cx + 12, cy - 8);
+    }
+
+    // Draw wire connection indicator (mid-wire, creates junction)
     if (wireHoverTarget) {
       const pixel = grid.charToPixel(wireHoverTarget.point.x, wireHoverTarget.point.y);
       const cx = pixel.x + offsetX;
@@ -487,8 +793,8 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
       ctx.fillText(label, cx + 12, cy - 8);
     }
 
-    // Draw crosshair cursor when not drawing (skip if hovering over pin or wire)
-    if (!this.drawing && this.currentPos && !pinHoverTarget && !wireHoverTarget) {
+    // Draw crosshair cursor when not drawing (skip if hovering over pin, wire, or floating end)
+    if (!this.drawing && this.currentPos && !pinHoverTarget && !wireHoverTarget && !floatingEndTarget) {
       const pixel = grid.charToPixel(this.currentPos.x, this.currentPos.y);
       const cx = pixel.x + offsetX;
       const cy = pixel.y + offsetY;

@@ -236,10 +236,29 @@ AsciiEditor.rendering.Renderer = class Renderer {
       case 'wire-junction':
         this.drawWireJunction(obj);
         break;
+      case 'wire-noconnect':
+        this.drawWireNoConnect(obj);
+        break;
       default:
         // Unknown type - log warning but don't render anything that might obscure content
         AsciiEditor.debug.warn('Renderer', 'Unknown object type', { type: obj.type, obj });
     }
+  }
+
+  // Draw wire no-connect marker (floating endpoint indicator)
+  drawWireNoConnect(obj) {
+    const { x, y } = obj;
+
+    const cssStyles = getComputedStyle(document.documentElement);
+    const bgCanvas = cssStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+    const xColor = '#000000';  // Black X for no-connect
+
+    // Clear cell and draw X
+    const px = x * this.grid.charWidth;
+    const py = y * this.grid.charHeight;
+    this.ctx.fillStyle = bgCanvas;
+    this.ctx.fillRect(px, py, this.grid.charWidth, this.grid.charHeight);
+    this.drawChar('X', x, y, xColor);
   }
 
   // OBJ-50 to OBJ-5J: Symbol rendering with explicit layer order (SYM-R1 to SYM-R12)
@@ -652,9 +671,43 @@ AsciiEditor.rendering.Renderer = class Renderer {
     // Wires render same as lines - reuse drawLine logic
     this.drawLine(obj);
 
+    // Note: Floating endpoint markers (no-connects) are now computed as derived
+    // objects by DerivedStateComputer and rendered separately as 'wire-noconnect' type
+
     // OBJ-62: Draw net label if present
     if (obj.net) {
       this.drawWireNetLabel(obj);
+    }
+  }
+
+  // OBJ-6F: Draw "X" marker at unbound wire endpoints
+  drawWireFloatingEnds(wire) {
+    if (!wire.points || wire.points.length < 2) return;
+
+    const cssStyles = getComputedStyle(document.documentElement);
+    const bgCanvas = cssStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+    const xColor = '#000000';  // Black X for no-connect
+
+    // Check start endpoint
+    if (!wire.startBinding) {
+      const start = wire.points[0];
+      // Clear cell and draw X
+      const px = start.x * this.grid.charWidth;
+      const py = start.y * this.grid.charHeight;
+      this.ctx.fillStyle = bgCanvas;
+      this.ctx.fillRect(px, py, this.grid.charWidth, this.grid.charHeight);
+      this.drawChar('X', start.x, start.y, xColor);
+    }
+
+    // Check end endpoint
+    if (!wire.endBinding) {
+      const end = wire.points[wire.points.length - 1];
+      // Clear cell and draw X
+      const px = end.x * this.grid.charWidth;
+      const py = end.y * this.grid.charHeight;
+      this.ctx.fillStyle = bgCanvas;
+      this.ctx.fillRect(px, py, this.grid.charWidth, this.grid.charHeight);
+      this.drawChar('X', end.x, end.y, xColor);
     }
   }
 
@@ -777,7 +830,7 @@ AsciiEditor.rendering.Renderer = class Renderer {
 
   // VIS-50 to VIS-55: Multi-pass rendering with type-based layers
   // Order: Grid → Lines/Junctions → Boxes/Text → Symbols → Tool Overlays
-  render(state, toolManager, editContext = null) {
+  render(state, toolManager, editContext = null, derivedState = null) {
     this.clear();
 
     const page = state.project.pages.find(p => p.id === state.activePageId);
@@ -788,11 +841,6 @@ AsciiEditor.rendering.Renderer = class Renderer {
 
     // Collect junction positions - end caps should not be drawn at junctions
     this.junctionPoints = new Set();
-    page.objects.forEach(obj => {
-      if (obj.type === 'junction') {
-        this.junctionPoints.add(`${obj.x},${obj.y}`);
-      }
-    });
 
     // Helper to draw an object with edit context support
     const drawWithEditContext = (obj) => {
@@ -807,45 +855,68 @@ AsciiEditor.rendering.Renderer = class Renderer {
       }
     };
 
-    // VIS-41 to VIS-44: PASS 1 - Lines and line junctions (lowest layer)
-    page.objects.forEach(obj => {
-      if (obj.type === 'line') {
-        drawWithEditContext(obj);
-      }
-    });
-    page.objects.forEach(obj => {
-      if (obj.type === 'junction') {
-        drawWithEditContext(obj);
-      }
-    });
+    // Use renderList from derivedState if available (new architecture)
+    // Otherwise fall back to legacy multi-pass rendering
+    if (derivedState && derivedState.renderList) {
+      // Collect junction positions from derived objects
+      derivedState.derivedObjects.forEach(obj => {
+        if (obj.type === 'junction' || obj.type === 'wire-junction') {
+          this.junctionPoints.add(`${obj.x},${obj.y}`);
+        }
+      });
 
-    // VIS-41A: PASS 1B - Wires (electrical connections, above visual lines)
-    page.objects.forEach(obj => {
-      if (obj.type === 'wire') {
+      // Single pass through sorted renderList
+      derivedState.renderList.forEach(obj => {
         drawWithEditContext(obj);
-      }
-    });
+      });
+    } else {
+      // Legacy multi-pass rendering (fallback)
+      page.objects.forEach(obj => {
+        if (obj.type === 'junction') {
+          this.junctionPoints.add(`${obj.x},${obj.y}`);
+        }
+      });
 
-    // VIS-41B: PASS 1C - Wire junctions (electrical connection points)
-    page.objects.forEach(obj => {
-      if (obj.type === 'wire-junction') {
-        drawWithEditContext(obj);
-      }
-    });
+      // VIS-41 to VIS-44: PASS 1 - Lines and line junctions (lowest layer)
+      page.objects.forEach(obj => {
+        if (obj.type === 'line') {
+          drawWithEditContext(obj);
+        }
+      });
+      page.objects.forEach(obj => {
+        if (obj.type === 'junction') {
+          drawWithEditContext(obj);
+        }
+      });
 
-    // VIS-45 to VIS-46: PASS 2 - Boxes and text (middle layer)
-    page.objects.forEach(obj => {
-      if (obj.type === 'box' || obj.type === 'text') {
-        drawWithEditContext(obj);
-      }
-    });
+      // VIS-41A: PASS 1B - Wires (electrical connections, above visual lines)
+      page.objects.forEach(obj => {
+        if (obj.type === 'wire') {
+          drawWithEditContext(obj);
+        }
+      });
 
-    // VIS-47 to VIS-4D: PASS 3 - Symbols (top layer - includes pins, designators)
-    page.objects.forEach(obj => {
-      if (obj.type === 'symbol') {
-        drawWithEditContext(obj);
-      }
-    });
+      // VIS-41B: PASS 1C - Wire junctions (electrical connection points)
+      page.objects.forEach(obj => {
+        if (obj.type === 'wire-junction') {
+          drawWithEditContext(obj);
+        }
+      });
+
+      // VIS-45 to VIS-46: PASS 2 - Boxes and text (middle layer)
+      page.objects.forEach(obj => {
+        if (obj.type === 'box' || obj.type === 'text') {
+          drawWithEditContext(obj);
+        }
+      });
+
+      // VIS-47 to VIS-4D: PASS 3 - Symbols (top layer - includes pins, designators)
+      page.objects.forEach(obj => {
+        if (obj.type === 'symbol') {
+          drawWithEditContext(obj);
+        }
+      });
+    }
 
     // VIS-4A: Draw tool overlay (always on top)
     toolManager.renderOverlay(this.ctx);

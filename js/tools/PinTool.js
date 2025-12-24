@@ -8,14 +8,15 @@ AsciiEditor.tools = AsciiEditor.tools || {};
 
 // Pin shapes (same vocabulary as line end caps)
 AsciiEditor.tools.PinShapes = [
-  { key: 'circle-outline', char: '○', name: 'Circle Outline' },
-  { key: 'circle', char: '●', name: 'Circle' },
   { key: 'square-outline', char: '□', name: 'Square Outline' },
   { key: 'square', char: '■', name: 'Square' },
+  { key: 'circle-outline', char: '○', name: 'Circle Outline' },
+  { key: 'circle', char: '●', name: 'Circle' },
+  { key: 'triangle-outline', char: '▷', name: 'Triangle Outline' },
+  { key: 'triangle', char: '▶', name: 'Triangle' },
   { key: 'diamond-outline', char: '◇', name: 'Diamond Outline' },
   { key: 'diamond', char: '◆', name: 'Diamond' },
-  { key: 'triangle-outline', char: '▷', name: 'Triangle Outline' },
-  { key: 'triangle', char: '▶', name: 'Triangle' }
+
 ];
 
 AsciiEditor.tools.PinTool = class PinTool extends AsciiEditor.tools.Tool {

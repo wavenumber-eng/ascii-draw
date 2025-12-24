@@ -20,6 +20,10 @@ AsciiEditor.Editor = class Editor {
     this.grid = null;
     this.renderer = null;
     this.toolManager = new AsciiEditor.tools.ToolManager();
+
+    // Derived state computer for junctions, no-connects, etc.
+    this.derivedComputer = new AsciiEditor.core.DerivedStateComputer();
+    this.derivedState = null;
     this.hotkeyManager = new AsciiEditor.core.HotkeyManager();
 
     // Inline editing state
@@ -2221,6 +2225,14 @@ AsciiEditor.Editor = class Editor {
     requestAnimationFrame(() => {
       this.renderPending = false;
       const state = this.history.getState();
+      const page = state.project.pages.find(p => p.id === state.activePageId);
+
+      // Compute derived state (junctions, no-connects) from primary objects
+      if (page) {
+        // Filter out existing derived objects from page.objects (for backwards compatibility)
+        const primaryObjects = page.objects.filter(o => !o.derived);
+        this.derivedState = this.derivedComputer.compute(primaryObjects);
+      }
 
       let editContext = null;
       if (this.editingObjectId) {
@@ -2232,7 +2244,7 @@ AsciiEditor.Editor = class Editor {
         };
       }
 
-      this.renderer.render(state, this.toolManager, editContext);
+      this.renderer.render(state, this.toolManager, editContext, this.derivedState);
     });
   }
 
