@@ -1,6 +1,76 @@
-# ASCII Diagram Editor - Architecture
+# Cell-Based Diagram Editor - Architecture
 
-This document describes the technical design, patterns, and code organization for the ASCII Diagram Editor. For functional requirements (what the product does), see `REQUIREMENTS.md`.
+This document describes the technical design, patterns, and code organization for the Cell-Based Diagram Editor. For functional requirements (what the product does), see `REQUIREMENTS.md`.
+
+---
+
+## 0. Core Concept: Cell-Based Diagram Engine
+
+### What This Really Is
+
+While the current primary output is ASCII art, this is fundamentally a **cell-based (grid-based) diagram editor**. The constraint is that all content is placed on a grid of cells, where each cell contains a single graphical element.
+
+This is conceptually identical to **tile-based engines** from 8-bit and 16-bit games — a grid where each cell contains one graphical element. In ASCII mode, that element is a character. In other modes, it could be an SVG element, a 3D mesh, or any other visual representation.
+
+### Key Abstractions
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ABSTRACT OBJECT MODEL                        │
+│     (boxes, symbols, lines, wires in CELL coordinates)          │
+│              Cell dimensions: CONFIGURABLE                      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+┌──────────────────────────┐    ┌──────────────────────────┐
+│   VIEWPORT (interactive) │    │   EXPORT (file output)   │
+│   ┌──────────────────┐   │    │   ┌──────────────────┐   │
+│   │ Canvas2D         │   │    │   │ ASCII text       │   │
+│   │ (current)        │   │    │   │ (current)        │   │
+│   ├──────────────────┤   │    │   ├──────────────────┤   │
+│   │ Three.js         │   │    │   │ SVG file         │   │
+│   │ (90°/iso/tilt)   │   │    │   ├──────────────────┤   │
+│   └──────────────────┘   │    │   │ HTML file        │   │
+└──────────────────────────┘    └──────────────────────────┘
+              │
+              ▼
+┌──────────────────────────┐
+│   RENDER BACKEND         │
+│   (what fills cells)     │
+│   ┌──────────────────┐   │
+│   │ ASCII chars      │   │
+│   ├──────────────────┤   │
+│   │ SVG elements     │   │
+│   ├──────────────────┤   │
+│   │ Extruded 3D      │   │
+│   └──────────────────┘   │
+└──────────────────────────┘
+```
+
+### Cell Dimensions
+
+Cell dimensions are **configurable**, not hardcoded:
+
+| Font | Cell Width | Cell Height | Aspect Ratio |
+|------|-----------|-------------|--------------|
+| Berkeley Mono 16px | 10px | 20px | 1:2 (tall) |
+| Press Start 2P | 8px | 8px | 1:1 (square) |
+| Custom | configurable | configurable | any |
+
+The rendering backend maps cells to visual output. The object model and tools are **agnostic** to cell dimensions — they work purely in cell coordinates (col, row).
+
+### Separation of Concerns
+
+| Layer | Responsibility | Knows About |
+|-------|----------------|-------------|
+| **Object Model** | Data structures for boxes, lines, symbols | Cell coordinates only |
+| **Tools** | User interaction, hit testing, commands | Cell coordinates, IViewport |
+| **Viewport** | Coordinate transforms, camera, events | Screen ↔ Cell mapping |
+| **Render Backend** | Visual representation of cells | How to draw cells |
+| **Exporter** | File output | How to serialize cells |
+
+Tools should **never** know whether they're running in a 2D canvas or a Three.js 3D environment. They receive cell coordinates from the viewport and operate on the object model.
 
 ---
 
@@ -68,17 +138,45 @@ ascii_draw/
 └── .gitignore
 ```
 
-### Future Directories (Not Yet Created)
+### Future Directories (Planned)
 
 These directories will be added as features are implemented:
 
 ```
 js/
+├── viewport/                 # Viewport implementations [NEW]
+│   ├── IViewport.js          # Interface definition
+│   ├── Canvas2DViewport.js   # Current 2D canvas (refactored from Editor)
+│   └── ThreeJSViewport.js    # Three.js 3D viewport (experimental)
+│
+├── backends/                 # Render backend implementations [NEW]
+│   ├── IRenderBackend.js     # Content rendering interface
+│   ├── CanvasASCIIBackend.js # Current renderer (refactored)
+│   ├── ThreeJSASCIIBackend.js# ASCII in Three.js (text meshes)
+│   └── ThreeJSSVGBackend.js  # SVG elements in Three.js
+│
+├── overlays/                 # Overlay renderer implementations [NEW]
+│   ├── IOverlayRenderer.js   # UI overlay interface
+│   ├── Canvas2DOverlay.js    # Current overlay (refactored from Renderer)
+│   └── ThreeJSOverlay.js     # 2D canvas over WebGL (or 3D billboards)
+│
+├── export/                   # Export formats (file output)
+│   ├── IExporter.js          # Interface definition
+│   ├── ASCIIExporter.js      # Plain text export (current)
+│   ├── ANSIExporter.js       # Terminal escape codes
+│   ├── HTMLExporter.js       # Styled HTML
+│   └── SVGExporter.js        # Vector graphics
+│
+├── domain/                   # Domain logic (extracted from tools) [NEW]
+│   ├── Wire.js               # Wire utilities (floating ends, bindings)
+│   ├── Symbol.js             # Symbol utilities (pin positions)
+│   └── Line.js               # Line utilities (junctions, segments)
+│
 ├── tools/
-│   ├── TextTool.js           # [TOOL-22] - not implemented
-│   ├── LineTool.js           # [TOOL-23] - not implemented
-│   ├── SymbolTool.js         # [TOOL-24] - not implemented
-│   ├── WireTool.js           # [TOOL-25] - not implemented
+│   ├── TextTool.js           # [TOOL-22] - implemented
+│   ├── LineTool.js           # [TOOL-23] - implemented
+│   ├── SymbolTool.js         # [TOOL-24] - partial
+│   ├── WireTool.js           # [TOOL-25] - implemented
 │   ├── PortTool.js           # [TOOL-26] - not implemented
 │   └── PowerTool.js          # [TOOL-27] - not implemented
 │
@@ -86,16 +184,10 @@ js/
 │   ├── ObjectRegistry.js
 │   ├── Box.js, Text.js, Line.js, etc.
 │
-├── ui/                       # UI components (future extraction)
-│   ├── PropertiesPanel.js
-│   ├── Toolbar.js
-│   └── PageTabs.js
-│
-└── export/                   # Export formats (future)
-    ├── AsciiExporter.js
-    ├── AnsiExporter.js
-    ├── HtmlExporter.js
-    └── SvgExporter.js
+└── ui/                       # UI components (future extraction)
+    ├── PropertiesPanel.js
+    ├── Toolbar.js
+    └── PageTabs.js
 ```
 
 ### Script Loading Order
@@ -226,12 +318,26 @@ User Action → Tool Handler → Command → HistoryManager → New State → Su
 
 ## 4. Coordinate System
 
-- **ARCH-30**: CharacterGrid handles pixel-to-character coordinate transforms
-- **ARCH-31**: All object positions stored in character coordinates (col, row)
-- **ARCH-32**: Rendering converts to pixel coordinates for canvas drawing
+- **ARCH-30**: Viewport abstraction handles screen-to-cell coordinate transforms
+- **ARCH-31**: All object positions stored in cell coordinates (col, row)
+- **ARCH-32**: Viewport converts screen coordinates to cell coordinates
 - **ARCH-33**: Grid snapping automatic for all placement operations
+- **ARCH-34**: Cell dimensions are configurable (not hardcoded to any font)
+- **ARCH-35**: Tools receive cell coordinates from viewport, never raw screen coordinates
 
-### CharacterGrid
+### Coordinate Transform Abstraction
+
+The coordinate system is **viewport-agnostic**. Whether using 2D canvas or Three.js, tools always work in cell coordinates:
+
+```
+Screen Input (mouse x,y) → Viewport.screenToCell() → Cell Coords (col, row) → Tools
+```
+
+For Three.js, this involves raycasting to a plane and converting world coordinates to cells. For 2D canvas, this is simple division by cell dimensions.
+
+### CharacterGrid (Legacy - To Be Refactored)
+
+The current `CharacterGrid` class will be **absorbed into Canvas2DViewport**:
 
 ```javascript
 class CharacterGrid {
@@ -244,13 +350,17 @@ class CharacterGrid {
 }
 ```
 
-### Character Dimensions
+### Cell Dimensions (Configurable)
 
-Berkeley Mono at 16px renders approximately:
-- Character width: 10px
-- Character height: 20px
+Cell dimensions adapt to the font or rendering style:
 
-All objects use integer character coordinates for clean alignment.
+| Font/Style | Cell Width | Cell Height | Notes |
+|------------|-----------|-------------|-------|
+| Berkeley Mono 16px | 10px | 20px | Current default |
+| Press Start 2P | 8px | 8px | Square pixel font |
+| Custom SVG | any | any | User-defined |
+
+All objects use integer cell coordinates for clean alignment. The actual pixel/world dimensions are determined by the viewport and render backend.
 
 ---
 
@@ -287,17 +397,21 @@ class Tool {
 
 ### Tool Context
 
-Tools receive a context object providing access to:
+Tools receive a context object providing access to shared resources. **Critically**, tools receive a `viewport` abstraction instead of direct canvas/grid access:
 
 ```javascript
 {
-  canvas: HTMLCanvasElement,
-  grid: CharacterGrid,
-  history: HistoryManager,
+  viewport: IViewport,        // Coordinate transforms (screenToCell, cellToScreen)
+  history: HistoryManager,    // State management and undo/redo
   startInlineEdit: Function,  // For text editing
+  startLabelEdit: Function,   // For designator/parameter editing
+  startPinEdit: Function,     // For pin name editing
+  setTool: Function,          // Switch active tool
   // ... other shared resources
 }
 ```
+
+**Important**: Tools should use `context.viewport.screenToCell(x, y)` for all coordinate conversion. They should **never** access raw canvas coordinates or assume a specific rendering backend.
 
 ### Tool Manager
 
@@ -413,22 +527,41 @@ export const ObjectRegistry = {
 
 ### Render Order
 
-1. Clear canvas
+1. Clear viewport
 2. Draw grid (if enabled)
-3. For each object on page (in order):
+3. For each object in renderList (sorted by zIndex):
    - Draw shadow (if enabled)
-   - Draw object
+   - Draw object via render backend
 4. Draw selection highlights
 5. Draw tool overlay (marquee, resize handles, etc.)
 6. Draw inline edit cursor (if editing)
 
-### Object Rendering
+### Rendering Architecture
 
-Each object type implements static `render(ctx, obj, grid, options)`:
-- `ctx`: Canvas 2D context
-- `obj`: Object data from state
-- `grid`: CharacterGrid for coordinate conversion
-- `options`: { selected, editing, theme }
+The rendering pipeline is now **backend-agnostic**:
+
+```
+State → DerivedStateComputer → RenderList → Viewport.render(renderList) → Backend.draw()
+```
+
+The **Viewport** owns the render backend and delegates drawing to it. This allows:
+- Canvas2DViewport + CanvasASCIIBackend (current)
+- ThreeJSViewport + ThreeJSASCIIBackend (3D ASCII)
+- ThreeJSViewport + ThreeJSSVGBackend (3D SVG)
+- ThreeJSViewport + ExtrudedBackend (3D with Z-height)
+
+### Object Rendering (Backend-Agnostic)
+
+Each object type is rendered through the backend interface:
+
+```javascript
+// Backend receives cell-based drawing commands
+backend.drawCell(col, row, char, style);
+backend.drawText(col, row, text, style);
+backend.drawLine(fromCol, fromRow, toCol, toRow, style);
+```
+
+The backend translates these to actual visual output (canvas fillText, Three.js meshes, SVG elements, etc.).
 
 ---
 
@@ -586,7 +719,371 @@ For canvas rendering and visual verification, use `test/test-export.html`:
 
 ---
 
-## 13. CSS Variables Reference
+## 13. Pluggable Architecture Interfaces
+
+### IViewport Interface
+
+The viewport abstraction handles all interaction between the user and the canvas/3D scene. It provides coordinate transforms and event handling.
+
+```javascript
+/**
+ * IViewport - Workspace abstraction for different rendering surfaces
+ * Implementations: Canvas2DViewport, ThreeJSViewport
+ */
+interface IViewport {
+  // Lifecycle
+  attach(container: HTMLElement): void;
+  detach(): void;
+
+  // Coordinate transforms (THE KEY ABSTRACTION)
+  screenToCell(screenX: number, screenY: number): { col: number, row: number };
+  cellToScreen(col: number, row: number): { x: number, y: number };
+
+  // Cell dimensions
+  setCellDimensions(width: number, height: number): void;
+  getCellDimensions(): { width: number, height: number };
+
+  // Navigation
+  pan(dx: number, dy: number): void;
+  zoom(factor: number, centerX?: number, centerY?: number): void;
+  resetView(): void;
+
+  // Three.js specific (optional, no-op for 2D)
+  setTilt(angle: number): void;        // Drafting table tilt
+  setIsometric(enabled: boolean): void; // Snap to isometric view
+  setCameraAngle(angle: number): void;  // Arbitrary camera angle
+
+  // Rendering (content)
+  setRenderBackend(backend: IRenderBackend): void;
+  getRenderBackend(): IRenderBackend;
+
+  // Rendering (overlays)
+  setOverlayRenderer(overlay: IOverlayRenderer): void;
+  getOverlayRenderer(): IOverlayRenderer;
+
+  // Frame rendering
+  render(renderState: RenderState): void;
+  requestRender(): void;  // Request next frame
+
+  // Events (tools register handlers)
+  getEventTarget(): HTMLElement;  // Element for mouse/keyboard events
+
+  // Grid
+  setGridVisible(visible: boolean): void;
+  setGridDimensions(cols: number, rows: number): void;
+}
+```
+
+### Rendering: Two Separate Concerns
+
+Rendering is split into **two distinct interfaces** with different responsibilities:
+
+| Interface | Renders | Exported? | Transforms with Camera? |
+|-----------|---------|-----------|------------------------|
+| `IRenderBackend` | Content (cells, objects) | Yes | Yes (in 3D) |
+| `IOverlayRenderer` | UI hints (selection, handles) | No | Configurable |
+
+This separation is critical for Three.js where content rotates/tilts with the camera but UI overlays may need to stay screen-aligned.
+
+### IRenderBackend Interface
+
+The render backend determines **what fills the cells** — ASCII characters, SVG elements, 3D meshes, etc. This is the **document content** that gets exported.
+
+```javascript
+/**
+ * IRenderBackend - Visual representation of document content (cells/objects)
+ * Implementations: CanvasASCIIBackend, ThreeJSASCIIBackend, ThreeJSSVGBackend
+ *
+ * IMPORTANT: This interface renders CONTENT ONLY (exportable).
+ * UI overlays are handled by IOverlayRenderer.
+ */
+interface IRenderBackend {
+  // Lifecycle
+  initialize(viewport: IViewport): void;
+  dispose(): void;
+
+  // Frame management
+  beginFrame(): void;
+  endFrame(): void;
+  clear(): void;
+
+  // Cell-level drawing
+  drawCell(col: number, row: number, char: string, style: CellStyle): void;
+  drawText(col: number, row: number, text: string, style: TextStyle): void;
+
+  // Object-level drawing (higher level)
+  drawBox(obj: BoxObject, options: DrawOptions): void;
+  drawLine(obj: LineObject, options: DrawOptions): void;
+  drawSymbol(obj: SymbolObject, options: DrawOptions): void;
+  drawJunction(obj: JunctionObject, options: DrawOptions): void;
+
+  // Grid (part of content, may be exported)
+  drawGrid(cols: number, rows: number, visible: boolean): void;
+
+  // Style support
+  getCharacterSet(): CharacterSet;  // Available glyphs/mappings
+}
+
+/**
+ * CellStyle - Visual properties for a cell
+ */
+interface CellStyle {
+  foreground?: string;   // Text/stroke color
+  background?: string;   // Fill color
+  opacity?: number;
+  zIndex?: number;       // For 3D: extrusion height
+}
+```
+
+### IOverlayRenderer Interface
+
+The overlay renderer handles **transient UI elements** — selection highlights, tool hints, drag previews. These are **never exported** and exist only during interactive editing.
+
+```javascript
+/**
+ * IOverlayRenderer - Transient UI overlays (not part of document)
+ * Implementations: Canvas2DOverlay, ThreeJSOverlay (2D canvas on top), ThreeJS3DOverlay
+ *
+ * IMPORTANT: Overlays are NEVER exported. They exist only for interactive editing.
+ */
+interface IOverlayRenderer {
+  // Lifecycle
+  initialize(viewport: IViewport): void;
+  dispose(): void;
+
+  // Frame management
+  beginFrame(): void;
+  endFrame(): void;
+  clear(): void;
+
+  // Selection overlays
+  drawSelectionHighlight(obj: Object, style: SelectionStyle): void;
+  drawMultiSelectionBox(bounds: Rect): void;
+  drawResizeHandles(obj: Object, handles: Handle[]): void;
+
+  // Marquee selection
+  drawMarquee(bounds: Rect, mode: MarqueeMode): void;  // 'enclosed' | 'intersect'
+
+  // Tool hints and previews
+  drawToolPreview(preview: ToolPreview): void;         // Box preview, line preview, etc.
+  drawSnapIndicator(col: number, row: number): void;   // Grid snap point
+  drawConnectionHint(pos: CellPos, label: string): void; // "PIN", "CONNECT", etc.
+  drawHoverHighlight(obj: Object): void;               // Object under cursor
+
+  // Drag feedback
+  drawDragGhost(objects: Object[], offset: CellPos): void;
+  drawRubberBand(start: CellPos, end: CellPos, style: LineStyle): void;
+
+  // Inline editing
+  drawTextCursor(col: number, row: number, visible: boolean): void;
+  drawTextSelection(start: CellPos, end: CellPos): void;
+
+  // Vertex/segment handles (for lines/wires)
+  drawVertexHandle(col: number, row: number, type: HandleType): void;
+  drawSegmentHandle(col: number, row: number, orientation: 'h' | 'v'): void;
+
+  // Pin handles (for symbols)
+  drawPinHandle(pos: CellPos, selected: boolean): void;
+  drawPinDropTarget(pos: CellPos, valid: boolean): void;
+
+  // Configuration
+  setScreenAligned(aligned: boolean): void;  // For 3D: stay screen-aligned vs rotate with content
+}
+
+/**
+ * MarqueeMode - Selection marquee behavior
+ */
+type MarqueeMode = 'enclosed' | 'intersect';
+
+/**
+ * HandleType - Types of draggable handles
+ */
+type HandleType = 'resize-nw' | 'resize-n' | 'resize-ne' |
+                  'resize-w' | 'resize-e' |
+                  'resize-sw' | 'resize-s' | 'resize-se' |
+                  'vertex' | 'segment' | 'pin';
+
+/**
+ * ToolPreview - Preview shape while using a tool
+ */
+interface ToolPreview {
+  type: 'box' | 'line' | 'symbol' | 'wire' | 'text';
+  bounds?: Rect;
+  points?: CellPos[];
+  style?: string;
+}
+```
+
+### Overlay Implementation Strategies
+
+#### Canvas2D Overlay (Current)
+
+For 2D canvas, content and overlays can share the same canvas context:
+- Draw content first
+- Draw overlays on top
+- Single canvas, simple z-ordering
+
+#### Three.js Overlay Options
+
+For Three.js, several strategies exist:
+
+**Option A: 2D Canvas Overlay (Recommended for most cases)**
+```
+┌─────────────────────────────┐
+│   2D Canvas (overlays)      │  ← Screen-aligned, always on top
+├─────────────────────────────┤
+│   WebGL Canvas (content)    │  ← Rotates/tilts with camera
+└─────────────────────────────┘
+```
+- Overlays rendered to separate 2D canvas positioned over WebGL
+- Always screen-aligned regardless of camera angle
+- Simple, performant, familiar drawing API
+
+**Option B: CSS3D Overlay**
+- HTML elements positioned via CSS3DRenderer
+- Good for complex UI (tooltips, menus)
+- Overlays as DOM elements
+
+**Option C: 3D Billboard Sprites**
+- Overlays as 3D sprites that face camera
+- Rotate with scene but always face viewer
+- More complex, but unified rendering pipeline
+
+**Option D: Hybrid**
+- Selection/handles as 3D (move with content when tilted)
+- Hints/tooltips as 2D overlay (always readable)
+
+The viewport determines which strategy to use based on configuration.
+
+### IExporter Interface
+
+Exporters handle **file output** — converting the object model to a specific format.
+
+```javascript
+/**
+ * IExporter - File output format
+ * Implementations: ASCIIExporter, SVGExporter, HTMLExporter, ANSIExporter
+ */
+interface IExporter {
+  // Export
+  export(state: ProjectState, options?: ExportOptions): string | Blob;
+
+  // Metadata
+  getName(): string;           // "ASCII", "SVG", etc.
+  getFileExtension(): string;  // "txt", "svg", "html"
+  getMimeType(): string;       // "text/plain", "image/svg+xml"
+
+  // Options
+  getDefaultOptions(): ExportOptions;
+  validateOptions(options: ExportOptions): boolean;
+}
+
+/**
+ * ExportOptions - Common export options
+ */
+interface ExportOptions {
+  pageId?: string;           // Export specific page (or all)
+  includeGrid?: boolean;     // Include grid in export
+  includeShadows?: boolean;  // Include shadow effects
+  embedFonts?: boolean;      // For HTML/SVG: embed font data
+}
+```
+
+### Viewport Implementations
+
+#### Canvas2DViewport (Current - Refactored)
+
+Wraps the current 2D canvas rendering:
+- Uses CanvasRenderingContext2D
+- Simple pixel-to-cell math
+- Pan via translate, zoom via scale
+- No tilt/isometric (2D only)
+
+#### ThreeJSViewport (Experimental)
+
+Uses Three.js for a 3D workspace:
+- OrthographicCamera looking at XY plane
+- MapControls for pan/zoom/tilt
+- Raycasting for screenToCell()
+- Optional: isometric preset, arbitrary tilt
+
+```javascript
+// Three.js specific features
+viewport.setTilt(30);         // Tilt like a drafting table
+viewport.setIsometric(true);  // Snap to isometric view (45° rotation)
+viewport.setCameraAngle(0);   // Top-down (current default)
+```
+
+### Backend Implementations
+
+#### CanvasASCIIBackend (Current - Refactored)
+
+Current renderer extracted to backend interface:
+- Uses canvas 2D context
+- fillText() for characters
+- fillRect() for backgrounds
+
+#### ThreeJSASCIIBackend (New)
+
+ASCII rendering in Three.js:
+- TextGeometry or sprite-based characters
+- Characters as 3D objects on a plane
+- Optional Z-height for extrusion effect
+
+#### ThreeJSSVGBackend (Future)
+
+SVG elements in Three.js:
+- SVGLoader to create 3D shapes from SVG paths
+- Lines become actual 3D line geometry
+- Boxes become extruded rectangles
+
+---
+
+## 14. Implementation Phases
+
+### Phase 1: Abstraction Layer (Foundation)
+
+Create interfaces without breaking current functionality:
+
+1. Define `IViewport` interface
+2. Create `Canvas2DViewport` wrapping current behavior
+3. Define `IRenderBackend` interface
+4. Create `CanvasASCIIBackend` from current Renderer.js
+5. Refactor Editor to use viewport abstraction
+6. Refactor tools to use `viewport.screenToCell()`
+7. Make cell dimensions configurable
+
+**Result:** Same functionality, but pluggable architecture
+
+### Phase 2: Clean Separation
+
+1. Separate export code from on-screen rendering
+2. Create `ASCIIExporter` implementing `IExporter`
+3. Extract domain logic (Wire, Symbol, Line modules)
+4. Remove dead code (ghost recomputeJunctions, dual render paths)
+
+**Result:** Clean codebase ready for new backends
+
+### Phase 3: Three.js Experiment
+
+1. Create `ThreeJSViewport` implementing `IViewport`
+2. Implement raycasting for `screenToCell()`
+3. Add MapControls (pan, zoom, tilt)
+4. Create `ThreeJSASCIIBackend` (text on plane)
+5. Add camera presets (top-down, isometric, custom tilt)
+
+**Result:** Optional 3D workspace with same tools
+
+### Phase 4: Advanced Rendering
+
+1. SVG render backend
+2. Extrusion effects (Z-height in Three.js)
+3. Multiple font support with aspect detection
+4. Additional export formats
+
+---
+
+## 15. CSS Variables Reference
 
 All colors are defined via CSS variables for easy theming:
 

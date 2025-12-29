@@ -1,4 +1,4 @@
-# ASCII Diagram Editor - Requirements
+# Cell-Based Diagram Editor - Requirements
 
 This document describes the functional requirements (what the product does). For technical architecture (how the code is structured), see `ARCHITECTURE.md`.
 
@@ -8,11 +8,28 @@ This document describes the functional requirements (what the product does). For
 
 ## 1. Vision & Overview
 
-A hybrid tool combining block diagram functionality with lightweight schematic capture capabilities. Primary output is ASCII art using Berkeley Mono font styling, with clean UTF box-drawing characters.
+### Core Concept: Cell-Based Diagram Engine
+
+This is fundamentally a **cell-based (grid-based) diagram editor** — conceptually similar to tile-based engines from 8-bit and 16-bit games. Each cell in the grid contains a single graphical element.
+
+The **current primary output** is ASCII art using Berkeley Mono font styling with UTF box-drawing characters. However, the architecture supports **multiple rendering backends** (ASCII, SVG, 3D) and **multiple viewports** (2D canvas, Three.js 3D).
+
+### Key Principles
+
+- **Cell coordinates are universal**: All objects are positioned in cell coordinates (col, row)
+- **Rendering is pluggable**: ASCII characters, SVG elements, or 3D meshes can fill cells
+- **Viewport is abstract**: 2D canvas or 3D workspace with the same tools
+- **Cell dimensions are configurable**: Different fonts have different aspect ratios
+
+### Use Cases
+
+1. **ASCII Diagrams**: Block diagrams, flowcharts, architecture docs for README/comments
+2. **Schematic Capture**: Lightweight EDA with symbols, pins, wires, netlists
+3. **3D Visualization**: Isometric/tilted view for presentations (future)
 
 **Inspiration:** `berkley_mono_reference.png` - clean boxes, arrows, shadow effects using extended ASCII/UTF characters.
 
-**Core Concept:** A connectivity graph with ASCII rendering. The JSON data model captures both structure (connections) and presentation (layout), enabling netlist generation, BOM export, and design rule checks while maintaining a lightweight, visual-first approach.
+**Data Model:** A connectivity graph with cell-based rendering. The JSON data model captures both structure (connections) and presentation (layout), enabling netlist generation, BOM export, and design rule checks while maintaining a lightweight, visual-first approach.
 
 ---
 
@@ -55,6 +72,152 @@ A hybrid tool combining block diagram functionality with lightweight schematic c
 - [~] **DEP-3**: No external dependencies at runtime (fonts embedded or bundled)
 - [x] **DEP-4**: Development may use build tools, but output is single portable file
 - [ ] **DEP-5**: Alternative deployment as Python script acceptable
+- [ ] **DEP-6**: Three.js viewport optional (loaded only when enabled)
+
+---
+
+## 3.5 Viewport Requirements
+
+The viewport is the workspace where users interact with the diagram. Multiple viewport implementations are supported.
+
+### Viewport Abstraction
+
+- [ ] **VIEW-1**: IViewport interface abstracts viewport implementation
+- [ ] **VIEW-2**: Tools receive viewport via context, never access canvas directly
+- [ ] **VIEW-3**: All coordinate transforms via viewport.screenToCell()
+- [ ] **VIEW-4**: Viewport provides event target for mouse/keyboard events
+
+### Canvas2D Viewport (Current)
+
+- [~] **VIEW-10**: 2D canvas rendering (current implementation)
+- [~] **VIEW-11**: Pan via mouse drag or keyboard
+- [~] **VIEW-12**: Zoom via scroll wheel or +/- keys
+- [x] **VIEW-13**: Grid overlay (toggleable)
+
+### Three.js Viewport (Experimental)
+
+- [ ] **VIEW-20**: Three.js 3D workspace as alternative viewport
+- [ ] **VIEW-21**: OrthographicCamera for consistent cell sizing
+- [ ] **VIEW-22**: Camera starts at 90° (top-down) matching 2D experience
+- [ ] **VIEW-23**: Pan/zoom via MapControls
+- [ ] **VIEW-24**: Tilt support for drafting-table angle
+- [ ] **VIEW-25**: Isometric view preset (45° rotation)
+- [ ] **VIEW-26**: Hotkey to toggle between top-down and isometric
+- [ ] **VIEW-27**: Raycasting for screenToCell() coordinate transform
+- [ ] **VIEW-28**: Same tools work in 3D as in 2D (via cell coordinates)
+
+### Viewport Switching
+
+- [ ] **VIEW-30**: UI control to switch between Canvas2D and Three.js viewports
+- [ ] **VIEW-31**: Viewport preference saved in project settings
+- [ ] **VIEW-32**: Fallback to Canvas2D if Three.js unavailable
+
+---
+
+## 3.6 Render Backend Requirements
+
+The render backend determines what visual elements fill each cell.
+
+### Backend Abstraction
+
+- [ ] **BACK-1**: IRenderBackend interface abstracts rendering implementation
+- [ ] **BACK-2**: Backends render cells, not pixels
+- [ ] **BACK-3**: Backends support object-level drawing (box, line, symbol)
+- [ ] **BACK-4**: Backends support overlay drawing (selection, handles, marquee)
+
+### ASCII Backend (Current)
+
+- [x] **BACK-10**: UTF-8 box-drawing characters for borders
+- [x] **BACK-11**: Monospace character rendering
+- [x] **BACK-12**: Shadow effects using ░▒▓ characters
+- [x] **BACK-13**: Fill patterns (none, light, medium, dark, solid, dots)
+
+### SVG Backend (Future)
+
+- [ ] **BACK-20**: SVG elements for cell content
+- [ ] **BACK-21**: Lines rendered as SVG `<line>` or `<path>`
+- [ ] **BACK-22**: Boxes rendered as SVG `<rect>`
+- [ ] **BACK-23**: Text rendered as SVG `<text>`
+- [ ] **BACK-24**: Scalable vector output
+
+### 3D Extruded Backend (Future)
+
+- [ ] **BACK-30**: Z-height extrusion for boxes/symbols when tilted
+- [ ] **BACK-31**: Depth effect visible only at non-90° camera angles
+- [ ] **BACK-32**: Optional per-object Z-index for extrusion height
+
+---
+
+## 3.65 Overlay Renderer Requirements
+
+Overlay rendering handles transient UI elements that are NOT part of the document.
+
+### Overlay Abstraction
+
+- [ ] **OVER-1**: IOverlayRenderer interface separate from IRenderBackend
+- [ ] **OVER-2**: Overlays are NEVER exported
+- [ ] **OVER-3**: Overlays may be screen-aligned (don't rotate with 3D camera)
+- [ ] **OVER-4**: Viewport owns both render backend and overlay renderer
+
+### Selection Overlays
+
+- [x] **OVER-10**: Selection highlight around selected objects
+- [x] **OVER-11**: Multi-selection bounding box
+- [x] **OVER-12**: Resize handles on single selection
+- [x] **OVER-13**: Vertex handles on lines/wires
+- [x] **OVER-14**: Segment handles on lines/wires
+
+### Marquee Selection Overlay
+
+- [x] **OVER-20**: Enclosed mode marquee (solid border)
+- [x] **OVER-21**: Intersect mode marquee (dashed border)
+- [x] **OVER-22**: Different fill colors for each mode
+
+### Tool Hints and Previews
+
+- [x] **OVER-30**: Box/symbol preview while creating
+- [x] **OVER-31**: Line/wire preview while drawing
+- [~] **OVER-32**: Snap indicator at grid positions
+- [~] **OVER-33**: Connection hints ("PIN", "CONNECT")
+- [~] **OVER-34**: Hover highlight on objects
+
+### Drag Feedback
+
+- [x] **OVER-40**: Drag ghost showing objects being moved
+- [x] **OVER-41**: Rubber-band line while drawing wires
+
+### Inline Editing Overlays
+
+- [x] **OVER-50**: Blinking text cursor
+- [ ] **OVER-51**: Text selection highlight
+
+### Three.js Overlay Strategy
+
+- [ ] **OVER-60**: 2D canvas overlay option (screen-aligned, on top of WebGL)
+- [ ] **OVER-61**: 3D billboard option (rotate with scene, face camera)
+- [ ] **OVER-62**: Hybrid option (hints 2D, handles 3D)
+- [ ] **OVER-63**: Configurable per-element screen-alignment
+
+---
+
+## 3.7 Cell Configuration Requirements
+
+Cell dimensions are configurable to support different fonts and rendering styles.
+
+### Cell Dimensions
+
+- [ ] **CELL-1**: Cell width and height configurable at runtime
+- [ ] **CELL-2**: Default cell dimensions from font metrics (Berkeley Mono: 10x20)
+- [ ] **CELL-3**: Square cell support (e.g., Press Start 2P: 8x8)
+- [ ] **CELL-4**: Cell aspect ratio affects object proportions
+- [ ] **CELL-5**: Grid adapts to cell dimensions
+
+### Font Support
+
+- [x] **CELL-10**: Berkeley Mono as primary font (10x20 aspect)
+- [ ] **CELL-11**: Press Start 2P as alternative (8x8 square)
+- [ ] **CELL-12**: Custom font support with measured cell dimensions
+- [ ] **CELL-13**: Font selection in project settings
 
 ---
 
@@ -676,29 +839,43 @@ Centralized debug logging with UI integration, replacing scattered console.log c
 
 ## 9. Export
 
+Export is **separate from on-screen rendering**. While on-screen rendering is interactive and real-time, export produces static file output. Both share the same object model but have different requirements.
+
+### Exporter Abstraction
+
+- [ ] **EXP-0A**: IExporter interface for all export formats
+- [ ] **EXP-0B**: Exporters are separate from render backends
+- [ ] **EXP-0C**: Common export options: page selection, grid, shadows
+- [ ] **EXP-0D**: Export via Ctrl+E opens format selection dialog
+
 ### ASCII/UTF-8 Export (Primary)
 
 - [x] **EXP-1**: Pure text output (no escape codes)
 - [x] **EXP-2**: For embedding in: C comments, READMEs, .md files
 - [ ] **EXP-3**: Knockout/reverse text falls back to brackets: `[U1]`
+- [ ] **EXP-4**: ASCIIExporter implements IExporter interface
 
 ### ANSI Terminal Export
 
 - [ ] **EXP-10**: VT100 escape codes included
 - [ ] **EXP-11**: Supports: reverse/knockout, colors
 - [ ] **EXP-12**: For terminal display, `cat` output
+- [ ] **EXP-13**: ANSIExporter implements IExporter interface
 
 ### HTML Export
 
 - [ ] **EXP-20**: Full styling via CSS
 - [ ] **EXP-21**: Supports: reverse/knockout, colors, fonts
 - [ ] **EXP-22**: Can embed Berkeley Mono font
+- [ ] **EXP-23**: HTMLExporter implements IExporter interface
 
 ### SVG Export
 
 - [ ] **EXP-30**: Vector graphics output
 - [ ] **EXP-31**: Full styling support
 - [ ] **EXP-32**: For documentation, high-fidelity output
+- [ ] **EXP-33**: SVGExporter implements IExporter interface
+- [ ] **EXP-34**: Cell-to-SVG mapping (lines→path, boxes→rect, etc.)
 
 ### Netlist Export (Future)
 
@@ -812,17 +989,38 @@ Defines the order in which elements are drawn. Higher layers overwrite lower lay
 | Category | Implemented | Total | Progress |
 |----------|-------------|-------|----------|
 | Philosophy (PHIL) | 8 | 13 | 62% |
-| Deployment (DEP) | 4 | 5 | 80% |
+| Deployment (DEP) | 4 | 6 | 67% |
+| Viewport (VIEW) | 1 | 16 | 6% |
+| Render Backend (BACK) | 4 | 12 | 33% |
+| Overlay Renderer (OVER) | 12 | 18 | 67% |
+| Cell Config (CELL) | 1 | 8 | 13% |
 | Tools (TOOL) | 4 | 10 | 40% |
 | Objects (OBJ) | 24 | 75 | 32% |
 | Selection (SEL) | 27 | 27 | 100% |
 | Multi-Select Edit (MSE) | 25 | 25 | 100% |
 | User Interface (UI) | 23 | 23 | 100% |
 | Data Model (DATA) | 10 | 15 | 67% |
-| Export (EXP) | 2 | 16 | 13% |
+| Export (EXP) | 2 | 20 | 10% |
 | Visual (VIS) | 10 | 11 | 91% |
 
-### Next Priority
+### Priority Track A: Pluggable Architecture (Foundation)
+
+1. **VIEW-1 to VIEW-4** - IViewport interface and abstraction
+2. **BACK-1 to BACK-4** - IRenderBackend interface (content only)
+3. **OVER-1 to OVER-4** - IOverlayRenderer interface (UI only)
+4. **Refactor Editor.js** - Use viewport abstraction
+5. **Refactor Renderer.js** - Split into CanvasASCIIBackend + Canvas2DOverlay
+6. **Refactor tools** - Use viewport.screenToCell()
+7. **CELL-1 to CELL-5** - Configurable cell dimensions
+
+### Priority Track B: Three.js Experiment
+
+1. **VIEW-20 to VIEW-28** - ThreeJSViewport implementation
+2. **MapControls integration** - Pan, zoom, tilt
+3. **ThreeJSASCIIBackend** - Text rendering in Three.js
+4. **Camera presets** - Top-down, isometric
+
+### Priority Track C: Feature Completion (Existing)
 
 1. **TOOL-24 (SymbolTool)** - Create symbols like boxes with designator/parameters
 2. **OBJ-50 to OBJ-5D** - Symbol object model (box properties + designator + parameters)
