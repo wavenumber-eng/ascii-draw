@@ -25,6 +25,11 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
     // Reference shared utilities
     this.lineUtils = AsciiEditor.core.lineUtils;
     this.styles = this.lineUtils.styles;
+
+    // Domain modules for clean separation
+    this.LineDomain = AsciiEditor.domain.Line;
+    this.SymbolDomain = AsciiEditor.domain.Symbol;
+    this.WireDomain = AsciiEditor.domain.Wire;
   }
 
   // Get current style object
@@ -81,7 +86,9 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
 
     if (event.button !== 0) return false;
 
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
     const clickPos = { x: col, y: row };
 
     if (!this.drawing) {
@@ -177,8 +184,8 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseMove(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-    this.currentPos = { x: col, y: row };
+    // Use col/row from event (viewport handles coordinate conversion)
+    this.currentPos = { x: event.col, y: event.row };
     return true;
   }
 
@@ -243,113 +250,47 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
 
   /**
    * Find wires at a given point (for connection detection)
+   * Delegates to domain.Line.findLinesAtPoint with wire type filter
    */
   findWiresAtPoint(point, objects) {
-    const results = [];
-    for (const obj of objects) {
-      if (obj.type === 'wire') {
-        const hitInfo = this.lineUtils.findPointOnLine(point, obj);
-        if (hitInfo) {
-          results.push({ object: obj, hitInfo });
-        }
-      }
-    }
-    return results;
+    return this.LineDomain.findLinesAtPoint(point, objects)
+      .filter(hit => hit.object.type === 'wire');
   }
 
   /**
    * OBJ-6G: Find floating (unbound) wire endpoints at a given point
-   * Returns { wire, isStart, point } or null
+   * Delegates to domain.Wire.findFloatingEndpointAtPoint
+   * @returns { wire, isStart, point } or null
    */
   findFloatingWireEnd(point, objects) {
-    for (const obj of objects) {
-      if (obj.type !== 'wire' || !obj.points || obj.points.length < 2) continue;
-
-      const start = obj.points[0];
-      const end = obj.points[obj.points.length - 1];
-
-      // Check start endpoint (floating if no startBinding)
-      if (!obj.startBinding && start.x === point.x && start.y === point.y) {
-        return { wire: obj, isStart: true, point: start };
-      }
-
-      // Check end endpoint (floating if no endBinding)
-      if (!obj.endBinding && end.x === point.x && end.y === point.y) {
-        return { wire: obj, isStart: false, point: end };
-      }
-    }
-    return null;
+    return this.WireDomain.findFloatingEndpointAtPoint(point.x, point.y, objects);
   }
 
   /**
    * OBJ-65: Find if a point is on a symbol edge
-   * Returns { symbol, edge, offset, position } or null
+   * Delegates to domain.Symbol.findSymbolEdgeAtPoint
+   * @returns { symbol, edge, offset, position } or null
    */
   findSymbolEdge(point, objects) {
-    const symbols = objects.filter(o => o.type === 'symbol');
-
-    for (const symbol of symbols) {
-      const { x, y, width, height } = symbol;
-
-      // Check left edge (excluding corners)
-      if (point.x === x && point.y > y && point.y < y + height - 1) {
-        const offset = height > 2 ? (point.y - y) / (height - 1) : 0.5;
-        return { symbol, edge: 'left', offset, position: point };
-      }
-
-      // Check right edge (excluding corners)
-      if (point.x === x + width - 1 && point.y > y && point.y < y + height - 1) {
-        const offset = height > 2 ? (point.y - y) / (height - 1) : 0.5;
-        return { symbol, edge: 'right', offset, position: point };
-      }
-
-      // Check top edge (excluding corners)
-      if (point.y === y && point.x > x && point.x < x + width - 1) {
-        const offset = width > 2 ? (point.x - x) / (width - 1) : 0.5;
-        return { symbol, edge: 'top', offset, position: point };
-      }
-
-      // Check bottom edge (excluding corners)
-      if (point.y === y + height - 1 && point.x > x && point.x < x + width - 1) {
-        const offset = width > 2 ? (point.x - x) / (width - 1) : 0.5;
-        return { symbol, edge: 'bottom', offset, position: point };
-      }
-    }
-
-    return null;
+    return this.SymbolDomain.findSymbolEdgeAtPoint(point.x, point.y, objects);
   }
 
   /**
    * OBJ-66: Find existing pin at a symbol edge position
+   * Delegates to domain.Symbol.findPinAtEdge
    */
   findPinAtEdge(symbol, edge, offset) {
-    if (!symbol.pins) return null;
-
-    const tolerance = 0.05; // Allow small offset tolerance
-    return symbol.pins.find(pin =>
-      pin.edge === edge && Math.abs(pin.offset - offset) < tolerance
-    );
+    return this.SymbolDomain.findPinAtEdge(symbol, edge, offset);
   }
 
   /**
    * OBJ-67: Get pin position from edge and offset
+   * Delegates to domain.Symbol.getPinPosition
    */
   getPinPosition(symbol, pin) {
-    const { x, y, width, height } = symbol;
-    const offset = pin.offset || 0.5;
-
-    switch (pin.edge) {
-      case 'left':
-        return { x: x, y: Math.floor(y + offset * (height - 1)) };
-      case 'right':
-        return { x: x + width - 1, y: Math.floor(y + offset * (height - 1)) };
-      case 'top':
-        return { x: Math.floor(x + offset * (width - 1)), y: y };
-      case 'bottom':
-        return { x: Math.floor(x + offset * (width - 1)), y: y + height - 1 };
-      default:
-        return { x: x, y: y };
-    }
+    const pos = this.SymbolDomain.getPinPosition(symbol, pin);
+    // Convert {col, row} to {x, y} for compatibility
+    return { x: pos.col, y: pos.row };
   }
 
   /**

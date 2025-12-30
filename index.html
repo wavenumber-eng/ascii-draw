@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ASCII Diagram Editor</title>
   <link rel="stylesheet" href="style.css">
+  <!-- Three.js for 3D viewport -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/MapControls.js"></script>
 </head>
 <body>
   <!-- Toolbar -->
@@ -42,6 +46,7 @@
     <div class="tool-separator"></div>
 
     <button class="tool-btn" id="btn-grid" title="Toggle Grid (G)">Grid</button>
+    <button class="tool-btn" id="btn-3d" title="Toggle 3D View (3)">3D</button>
     <button class="tool-btn" id="btn-export" title="Export ASCII (Ctrl+E)">Export</button>
     <button class="tool-btn" id="btn-new" title="New Project (Ctrl+N)">New</button>
     <button class="tool-btn" id="btn-save" title="Save (Ctrl+S)">Save</button>
@@ -119,6 +124,24 @@
   <script src="js/core/HotkeyManager.js"></script>
   <script src="js/core/lineUtils.js"></script>
   <script src="js/core/DerivedStateComputer.js"></script>
+
+  <!-- Domain Logic Modules (pure functions, no UI) -->
+  <script src="js/domain/Line.js"></script>
+  <script src="js/domain/Symbol.js"></script>
+  <script src="js/domain/Wire.js"></script>
+
+  <!-- Pluggable Architecture Interfaces -->
+  <script src="js/viewport/IViewport.js"></script>
+  <script src="js/backends/IRenderBackend.js"></script>
+  <script src="js/overlays/IOverlayRenderer.js"></script>
+  <script src="js/export/IExporter.js"></script>
+
+  <!-- Pluggable Architecture Implementations -->
+  <script src="js/viewport/Canvas2DViewport.js"></script>
+  <script src="js/viewport/ThreeJSViewport.js"></script>
+  <script src="js/backends/CanvasASCIIBackend.js"></script>
+  <script src="js/overlays/Canvas2DOverlay.js"></script>
+  <script src="js/export/ASCIIExporter.js"></script>
 
   <!-- Tools (depends on core) -->
   <script src="js/tools/Tool.js"></script>

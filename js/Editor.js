@@ -17,6 +17,14 @@ AsciiEditor.Editor = class Editor {
     const initialState = savedState || AsciiEditor.core.createInitialState();
     this.history = new AsciiEditor.core.HistoryManager(initialState);
 
+    // Pluggable architecture components
+    this.viewport = null;
+    this.viewport2D = null; // Store 2D viewport when switching to 3D
+    this.backend = null;
+    this.overlay = null;
+    this.is3DMode = false;
+
+    // Legacy compatibility
     this.grid = null;
     this.renderer = null;
     this.toolManager = new AsciiEditor.tools.ToolManager();
@@ -68,7 +76,10 @@ AsciiEditor.Editor = class Editor {
     // Measure font and set up grid
     await this.setupFont();
 
-    // Set up renderer
+    // Set up pluggable architecture
+    await this.setupViewport();
+
+    // Legacy renderer for backward compatibility
     this.renderer = new AsciiEditor.rendering.Renderer(this.canvas, this.grid);
     await this.renderer.loadFont();
 
@@ -123,11 +134,52 @@ AsciiEditor.Editor = class Editor {
     AsciiEditor.debug.info('Editor', `Character dimensions: ${charWidth}x${charHeight}`);
   }
 
+  async setupViewport() {
+    const state = this.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+
+    // Create viewport with cell dimensions from grid
+    this.viewport = new AsciiEditor.viewport.Canvas2DViewport({
+      cellWidth: this.grid.charWidth,
+      cellHeight: this.grid.charHeight,
+      cols: page ? page.width : 120,
+      rows: page ? page.height : 60
+    });
+
+    // The canvas already exists in the DOM, so we'll use it directly
+    // instead of having viewport create a new one
+    this.viewport.canvas = this.canvas;
+    this.viewport.ctx = this.canvas.getContext('2d');
+    this.viewport.container = this.canvas.parentElement;
+
+    // Load font via viewport
+    await this.viewport.loadFont();
+
+    // Create and attach render backend
+    this.backend = new AsciiEditor.backends.CanvasASCIIBackend();
+    this.viewport.setRenderBackend(this.backend);
+
+    // Create and attach overlay renderer
+    this.overlay = new AsciiEditor.overlays.Canvas2DOverlay();
+    this.viewport.setOverlayRenderer(this.overlay);
+
+    AsciiEditor.debug.info('Editor', 'Pluggable viewport architecture initialized');
+  }
+
   updateCanvasSize(page) {
     if (!page || !this.grid) return;
     const width = page.width * this.grid.charWidth;
     const height = page.height * this.grid.charHeight;
-    this.renderer.setCanvasSize(width, height);
+
+    // Update legacy renderer
+    if (this.renderer) {
+      this.renderer.setCanvasSize(width, height);
+    }
+
+    // Update new viewport
+    if (this.viewport) {
+      this.viewport.setGridDimensions(page.width, page.height);
+    }
   }
 
   setupTools() {
@@ -140,10 +192,11 @@ AsciiEditor.Editor = class Editor {
     this.toolManager.register(new AsciiEditor.tools.SymbolTool());
     this.toolManager.register(new AsciiEditor.tools.PinTool());
 
-    // Set context
+    // Set context - includes both legacy (canvas, grid) and new (viewport) references
     this.toolManager.setContext({
       canvas: this.canvas,
       grid: this.grid,
+      viewport: this.viewport,
       history: this.history,
       startInlineEdit: (obj, initialChar) => this.startInlineEdit(obj, initialChar),
       startLabelEdit: (symbol, labelType, paramIndex, initialChar) => this.startLabelEdit(symbol, labelType, paramIndex, initialChar),
@@ -176,6 +229,20 @@ AsciiEditor.Editor = class Editor {
 
     // View
     hk.register('g', () => this.toggleGrid());
+    hk.register('3', () => this.toggle3D());
+
+    // 3D view presets (work when in 3D mode)
+    // Alt+number for view presets
+    hk.register('alt+1', () => this.set3DView('top'));        // Alt+1: Top-down view
+    hk.register('alt+2', () => this.set3DView('angle'));      // Alt+2: Angled view (30°)
+    hk.register('alt+3', () => this.set3DView('iso'));        // Alt+3: Isometric view
+    hk.register('alt+4', () => this.set3DView('front'));      // Alt+4: Front view
+    hk.register('alt+5', () => this.set3DView('side'));       // Alt+5: Side view
+
+    // Zoom controls
+    hk.register('ctrl+=', () => this.zoomIn());
+    hk.register('ctrl+-', () => this.zoomOut());
+    hk.register('ctrl+0', () => this.resetZoom());
 
     // File operations
     hk.register('ctrl+n', () => this.newProject());
@@ -222,6 +289,16 @@ AsciiEditor.Editor = class Editor {
     // Prevent context menu on canvas (right-click used for tool actions)
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
+    // Zoom with mouse wheel
+    this.canvas.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false });
+
+    // Pan state tracking
+    this.isPanning = false;
+    this.panStart = null;
+    this.panButton = null;
+    this.panTotalMovement = 0;
+    this.spaceHeld = false;
+
     // Keyboard events
     document.addEventListener('keydown', (e) => this.handleKeyDown(e));
     document.addEventListener('keyup', (e) => this.handleKeyUp(e));
@@ -236,6 +313,7 @@ AsciiEditor.Editor = class Editor {
     document.getElementById('btn-undo').addEventListener('click', () => this.history.undo());
     document.getElementById('btn-redo').addEventListener('click', () => this.history.redo());
     document.getElementById('btn-grid').addEventListener('click', () => this.toggleGrid());
+    document.getElementById('btn-3d').addEventListener('click', () => this.toggle3D());
     document.getElementById('btn-new').addEventListener('click', () => this.newProject());
     document.getElementById('btn-save').addEventListener('click', () => this.saveProject());
     document.getElementById('btn-load').addEventListener('click', () => this.loadProject());
@@ -2087,7 +2165,76 @@ AsciiEditor.Editor = class Editor {
   // EVENT HANDLERS
   // ============================================================
 
+  _createMouseEvent(e) {
+    // Use current viewport's canvas for coordinate calculation
+    const currentCanvas = this.viewport && this.viewport.getCanvas ? this.viewport.getCanvas() : this.canvas;
+    const rect = currentCanvas.getBoundingClientRect();
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+
+    // Get cell coordinates accounting for pan/zoom
+    let col, row, pixelX, pixelY;
+    if (this.viewport) {
+      // Use viewport's screenToCell for coordinate transform
+      const cell = this.viewport.screenToCell(canvasX, canvasY);
+      col = cell.col;
+      row = cell.row;
+
+      // Compute pixel position in world space (for sub-cell precision)
+      const is3D = this.viewport.getType && this.viewport.getType() === 'threejs';
+      if (is3D) {
+        // For 3D, pixelX/Y are in grid pixel space
+        pixelX = col * this.grid.charWidth;
+        pixelY = row * this.grid.charHeight;
+      } else {
+        const zoom = this.viewport.getZoom();
+        pixelX = (canvasX - this.viewport.panX) / zoom;
+        pixelY = (canvasY - this.viewport.panY) / zoom;
+      }
+    } else {
+      const pos = this.grid.pixelToChar(canvasX, canvasY);
+      col = pos.col;
+      row = pos.row;
+      pixelX = canvasX;
+      pixelY = canvasY;
+    }
+
+    return {
+      canvasX,
+      canvasY,
+      pixelX,
+      pixelY,
+      col,
+      row,
+      button: e.button,
+      shiftKey: e.shiftKey,
+      ctrlKey: e.ctrlKey,
+      altKey: e.altKey
+    };
+  }
+
   handleMouseDown(e) {
+    // Middle mouse (button 1) or space+click always starts pan
+    if (e.button === 1 || (this.spaceHeld && e.button === 0)) {
+      e.preventDefault();
+      this.startPan(e);
+      return;
+    }
+
+    // Right mouse button (button 2) - let tool handle first, then pan if not handled
+    if (e.button === 2) {
+      e.preventDefault();
+      const event = this._createMouseEvent(e);
+      // If tool handles right-click (e.g., to finish line), don't pan
+      if (this.toolManager.onMouseDown(event)) {
+        this.render();
+        return;
+      }
+      // Tool didn't handle it, start pan
+      this.startPan(e);
+      return;
+    }
+
     if (this.editingObjectId) {
       this.finishInlineEdit();
     }
@@ -2100,15 +2247,7 @@ AsciiEditor.Editor = class Editor {
       this.finishPinEdit();
     }
 
-    const rect = this.canvas.getBoundingClientRect();
-    const event = {
-      canvasX: e.clientX - rect.left,
-      canvasY: e.clientY - rect.top,
-      button: e.button,
-      shiftKey: e.shiftKey,
-      ctrlKey: e.ctrlKey,
-      altKey: e.altKey
-    };
+    const event = this._createMouseEvent(e);
 
     if (this.toolManager.onMouseDown(event)) {
       this.render();
@@ -2116,18 +2255,16 @@ AsciiEditor.Editor = class Editor {
   }
 
   handleMouseMove(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const event = {
-      canvasX: e.clientX - rect.left,
-      canvasY: e.clientY - rect.top,
-      button: e.button,
-      shiftKey: e.shiftKey,
-      ctrlKey: e.ctrlKey,
-      altKey: e.altKey
-    };
+    // Handle panning
+    if (this.isPanning) {
+      this.updatePan(e);
+      return;
+    }
 
-    const { col, row } = this.grid.pixelToChar(event.canvasX, event.canvasY);
-    document.getElementById('status-position').textContent = `Col: ${col}, Row: ${row}`;
+    const event = this._createMouseEvent(e);
+
+    // Update cursor position from event (already transformed)
+    document.getElementById('status-position').textContent = `Col: ${event.col}, Row: ${event.row}`;
 
     if (this.toolManager.onMouseMove(event)) {
       this.render();
@@ -2135,15 +2272,13 @@ AsciiEditor.Editor = class Editor {
   }
 
   handleMouseUp(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const event = {
-      canvasX: e.clientX - rect.left,
-      canvasY: e.clientY - rect.top,
-      button: e.button,
-      shiftKey: e.shiftKey,
-      ctrlKey: e.ctrlKey,
-      altKey: e.altKey
-    };
+    // End panning (pass event for context menu detection)
+    if (this.isPanning) {
+      this.endPan(e);
+      return;
+    }
+
+    const event = this._createMouseEvent(e);
 
     if (this.toolManager.onMouseUp(event)) {
       this.render();
@@ -2151,11 +2286,7 @@ AsciiEditor.Editor = class Editor {
   }
 
   handleDoubleClick(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const event = {
-      canvasX: e.clientX - rect.left,
-      canvasY: e.clientY - rect.top
-    };
+    const event = this._createMouseEvent(e);
 
     if (this.toolManager.onDoubleClick(event)) {
       this.render();
@@ -2163,6 +2294,14 @@ AsciiEditor.Editor = class Editor {
   }
 
   handleKeyDown(e) {
+    // Track space key for pan mode
+    if (e.code === 'Space' && !this.spaceHeld) {
+      this.spaceHeld = true;
+      this.canvas.style.cursor = 'grab';
+      e.preventDefault();
+      return;
+    }
+
     if (this.editingObjectId && document.activeElement === this.inlineEditor) {
       return;
     }
@@ -2194,6 +2333,15 @@ AsciiEditor.Editor = class Editor {
   }
 
   handleKeyUp(e) {
+    // Track space key release
+    if (e.code === 'Space') {
+      this.spaceHeld = false;
+      if (!this.isPanning) {
+        this.canvas.style.cursor = '';
+      }
+      return;
+    }
+
     if (this.toolManager.onKeyUp(e)) {
       this.render();
     }
@@ -2215,6 +2363,272 @@ AsciiEditor.Editor = class Editor {
       ...s,
       ui: { ...s.ui, gridVisible: !s.ui.gridVisible }
     }));
+  }
+
+  set3DView(preset) {
+    if (!this.is3DMode || !this.viewport || !this.viewport.setViewPreset) return;
+    this.viewport.setViewPreset(preset);
+    this.render();
+  }
+
+  toggle3D() {
+    this.is3DMode = !this.is3DMode;
+
+    const btn = document.getElementById('btn-3d');
+    if (btn) {
+      btn.classList.toggle('active', this.is3DMode);
+    }
+
+    if (this.is3DMode) {
+      this._switchTo3DViewport();
+    } else {
+      this._switchTo2DViewport();
+    }
+  }
+
+  _switchTo3DViewport() {
+    if (!AsciiEditor.viewport.ThreeJSViewport) {
+      console.error('ThreeJSViewport not available');
+      this.is3DMode = false;
+      return;
+    }
+
+    const state = this.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+
+    // Create 3D viewport
+    const viewport3D = new AsciiEditor.viewport.ThreeJSViewport({
+      cellWidth: this.grid.charWidth,
+      cellHeight: this.grid.charHeight,
+      cols: page ? page.width : 120,
+      rows: page ? page.height : 60
+    });
+
+    // Get the canvas container
+    const container = document.getElementById('canvas-wrapper');
+
+    // Hide the 2D canvas
+    this.canvas.style.display = 'none';
+
+    // Attach 3D viewport
+    viewport3D.attach(container);
+
+    // Set up render callback
+    viewport3D.setRenderCallback(() => this.render());
+
+    // Store reference and swap
+    this.viewport2D = this.viewport;
+    this.viewport = viewport3D;
+
+    // Re-initialize backend with new viewport context
+    if (this.backend) {
+      this.backend.initialize(viewport3D);
+    }
+
+    // Update tool context
+    this.toolManager.setContext({
+      canvas: viewport3D.getCanvas(),
+      grid: this.grid,
+      history: this.history,
+      startInlineEdit: (obj, initialChar) => this.startInlineEdit(obj, initialChar),
+      startLabelEdit: (symbol, type, paramIndex, initialChar) => this.startLabelEdit(symbol, type, paramIndex, initialChar),
+      setTool: (toolName) => this.setTool(toolName),
+      viewport: viewport3D
+    });
+
+    // Set up event listeners on 3D canvas
+    // Use pointer events (not mouse events) because Three.js controls use pointer capture
+    const canvas3D = viewport3D.getCanvas();
+    if (canvas3D) {
+      this._3dEventHandlers = {
+        pointerdown: (e) => {
+          // Stop propagation for left-click only (tools)
+          // Let MapControls handle right-click (pan) and middle-click
+          if (e.button === 0) {
+            e.stopPropagation();
+            this.handleMouseDown(e);
+          }
+          // Right-click: just track for status updates, MapControls handles pan
+        },
+        pointermove: (e) => this.handleMouseMove(e),
+        pointerup: (e) => {
+          if (e.button === 0) {
+            e.stopPropagation();
+            this.handleMouseUp(e);
+          }
+        },
+        dblclick: (e) => this.handleDoubleClick(e),
+        wheel: (e) => this.handleWheel(e),
+        contextmenu: (e) => e.preventDefault()
+      };
+      for (const [event, handler] of Object.entries(this._3dEventHandlers)) {
+        canvas3D.addEventListener(event, handler, true); // capture phase
+      }
+    }
+
+    this.render();
+    AsciiEditor.debug.info('Editor', 'Switched to 3D viewport');
+  }
+
+  _switchTo2DViewport() {
+    // Remove 3D event listeners (must match capture phase used when adding)
+    if (this._3dEventHandlers && this.viewport && this.viewport.getCanvas) {
+      const canvas3D = this.viewport.getCanvas();
+      if (canvas3D) {
+        for (const [event, handler] of Object.entries(this._3dEventHandlers)) {
+          canvas3D.removeEventListener(event, handler, true); // capture phase
+        }
+      }
+      this._3dEventHandlers = null;
+    }
+
+    if (this.viewport && this.viewport.getType() === 'threejs') {
+      this.viewport.detach();
+    }
+
+    // Show the 2D canvas again
+    this.canvas.style.display = 'block';
+
+    // Restore 2D viewport
+    if (this.viewport2D) {
+      this.viewport = this.viewport2D;
+      this.viewport2D = null;
+    }
+
+    // Re-initialize backend with 2D viewport context
+    if (this.backend && this.viewport) {
+      this.backend.initialize(this.viewport);
+    }
+
+    // Update tool context
+    this.toolManager.setContext({
+      canvas: this.canvas,
+      grid: this.grid,
+      history: this.history,
+      startInlineEdit: (obj, initialChar) => this.startInlineEdit(obj, initialChar),
+      startLabelEdit: (symbol, type, paramIndex, initialChar) => this.startLabelEdit(symbol, type, paramIndex, initialChar),
+      setTool: (toolName) => this.setTool(toolName),
+      viewport: this.viewport
+    });
+
+    this.render();
+    AsciiEditor.debug.info('Editor', 'Switched to 2D viewport');
+  }
+
+  // ============================================================
+  // ZOOM AND PAN
+  // ============================================================
+
+  handleWheel(e) {
+    if (!this.viewport) return;
+
+    // In 3D mode, let MapControls handle zoom
+    const is3D = this.viewport.getType && this.viewport.getType() === 'threejs';
+    if (is3D) {
+      // MapControls handles zoom, just re-render
+      this.render();
+      return;
+    }
+
+    e.preventDefault();
+
+    // Zoom with mouse wheel (Ctrl+wheel for finer control)
+    const zoomFactor = e.ctrlKey ? 1.05 : 1.15;
+    const direction = e.deltaY < 0 ? zoomFactor : 1 / zoomFactor;
+
+    // Get mouse position relative to canvas
+    const currentCanvas = this.viewport.getCanvas ? this.viewport.getCanvas() : this.canvas;
+    const rect = currentCanvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    this.viewport.zoom(direction, mouseX, mouseY);
+    this.render();
+    this.updateZoomStatus();
+  }
+
+  zoomIn() {
+    if (!this.viewport) return;
+    this.viewport.zoom(1.25);
+    this.render();
+    this.updateZoomStatus();
+  }
+
+  zoomOut() {
+    if (!this.viewport) return;
+    this.viewport.zoom(0.8);
+    this.render();
+    this.updateZoomStatus();
+  }
+
+  resetZoom() {
+    if (!this.viewport) return;
+    this.viewport.resetView();
+    this.render();
+    this.updateZoomStatus();
+  }
+
+  updateZoomStatus() {
+    if (!this.viewport) return;
+    const zoom = Math.round(this.viewport.getZoom() * 100);
+    document.getElementById('status-zoom').textContent = `Zoom: ${zoom}%`;
+  }
+
+  // Handle pan with middle mouse button, right-click drag, or space+drag
+  startPan(e) {
+    this.isPanning = true;
+    this.panStart = { x: e.clientX, y: e.clientY };
+    this.panButton = e.button; // Track which button started the pan
+    this.panTotalMovement = 0; // Track total movement for context menu detection
+    const currentCanvas = this.viewport && this.viewport.getCanvas ? this.viewport.getCanvas() : this.canvas;
+    currentCanvas.style.cursor = 'grabbing';
+  }
+
+  updatePan(e) {
+    if (!this.isPanning || !this.panStart || !this.viewport) return;
+
+    const dx = e.clientX - this.panStart.x;
+    const dy = e.clientY - this.panStart.y;
+
+    // Track total movement to distinguish click from drag
+    this.panTotalMovement += Math.abs(dx) + Math.abs(dy);
+
+    this.viewport.pan(dx, dy);
+    this.panStart = { x: e.clientX, y: e.clientY };
+    this.render();
+  }
+
+  endPan(e) {
+    const wasRightClick = this.panButton === 2;
+    const wasClick = this.panTotalMovement < 5; // Less than 5px = click, not drag
+
+    this.isPanning = false;
+    this.panStart = null;
+    this.panButton = null;
+    this.panTotalMovement = 0;
+    const currentCanvas = this.viewport && this.viewport.getCanvas ? this.viewport.getCanvas() : this.canvas;
+    currentCanvas.style.cursor = '';
+
+    // Right-click without drag = context menu
+    if (wasRightClick && wasClick && e) {
+      this.showContextMenu(e);
+    }
+  }
+
+  /**
+   * Show context menu at mouse position
+   * TODO: Implement actual context menu with options like:
+   * - Cut/Copy/Paste/Delete (for selected objects)
+   * - Bring to Front / Send to Back
+   * - Edit Text (for boxes)
+   * - Change Style (for lines/wires)
+   * - Object properties
+   */
+  showContextMenu(e) {
+    const event = this._createMouseEvent(e);
+    // TODO: Implement context menu UI
+    // For now, just log that it would appear
+    console.log('Context menu would appear at:', event.col, event.row);
   }
 
   render() {
@@ -2244,8 +2658,190 @@ AsciiEditor.Editor = class Editor {
         };
       }
 
-      this.renderer.render(state, this.toolManager, editContext, this.derivedState);
+      // Use new pluggable architecture if available
+      if (this.viewport && this.backend) {
+        this._renderWithNewArchitecture(state, page, editContext);
+      } else {
+        // Fallback to legacy renderer
+        this.renderer.render(state, this.toolManager, editContext, this.derivedState);
+      }
     });
+  }
+
+  _renderWithNewArchitecture(state, page, editContext) {
+    if (!this.viewport || !this.backend) return;
+
+    const ctx = this.viewport.getContext();
+    if (!ctx) return;
+
+    // Update viewport grid visibility
+    this.viewport.gridVisible = state.ui.gridVisible;
+
+    const is3D = this.viewport.getType && this.viewport.getType() === 'threejs';
+
+    // Save context state and apply viewport transforms
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Clear canvas and apply transforms
+    const styles = getComputedStyle(document.documentElement);
+    const bgCanvas = styles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+    ctx.fillStyle = bgCanvas;
+
+    if (is3D) {
+      // For 3D viewport: clear content canvas and apply 2x scale
+      const contentCanvas = ctx.canvas;
+      ctx.fillRect(0, 0, contentCanvas.width, contentCanvas.height);
+      // Content canvas is 2x resolution, so scale up
+      const scale = contentCanvas.width / (page ? page.width * this.grid.charWidth : 1200);
+      ctx.scale(scale, scale);
+    } else {
+      // For 2D viewport: apply DPR, pan, and zoom
+      const dpr = window.devicePixelRatio || 1;
+      ctx.scale(dpr, dpr);
+      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.translate(this.viewport.panX, this.viewport.panY);
+      ctx.scale(this.viewport.zoomLevel, this.viewport.zoomLevel);
+    }
+
+    // Begin rendering
+    this.backend.beginFrame();
+
+    // Draw grid
+    if (state.ui.gridVisible && page) {
+      this.backend.drawGrid(page.width, page.height, true);
+    }
+
+    // Draw all objects from render list
+    if (this.derivedState && this.derivedState.renderList) {
+      this.derivedState.renderList.forEach(obj => {
+        this._drawObjectWithBackend(obj, editContext);
+      });
+    }
+
+    this.backend.endFrame();
+
+    // Draw edit cursor if editing
+    if (editContext && editContext.cursorVisible) {
+      this._drawEditCursor(editContext);
+    }
+
+    // Draw edit cursor while still transformed
+    // (it needs to appear at the correct cell position)
+
+    // Restore context for overlays
+    ctx.restore();
+
+    // Apply transforms again for tool overlays (they use grid.charToPixel which is untransformed)
+    ctx.save();
+    if (is3D) {
+      // For 3D: use same scale as content
+      const contentCanvas = ctx.canvas;
+      const scale = contentCanvas.width / (page ? page.width * this.grid.charWidth : 1200);
+      ctx.scale(scale, scale);
+    } else {
+      // For 2D: apply DPR, pan, zoom
+      const dpr2 = window.devicePixelRatio || 1;
+      ctx.scale(dpr2, dpr2);
+      ctx.translate(this.viewport.panX, this.viewport.panY);
+      ctx.scale(this.viewport.zoomLevel, this.viewport.zoomLevel);
+    }
+
+    // Let tools draw their overlays (legacy pattern - tools draw directly to ctx)
+    this.toolManager.renderOverlay(ctx);
+
+    ctx.restore();
+
+    // Update texture for 3D viewport
+    if (this.viewport.updateTexture) {
+      this.viewport.updateTexture();
+    }
+  }
+
+  _drawObjectWithBackend(obj, editContext) {
+    // Handle edit context preview
+    let drawObj = obj;
+    if (editContext && editContext.objectId === obj.id && editContext.previewText !== null) {
+      drawObj = { ...obj, text: editContext.previewText };
+    }
+
+    switch (obj.type) {
+      case 'box':
+        this.backend.drawBox(drawObj);
+        break;
+      case 'symbol':
+        this.backend.drawSymbol(drawObj);
+        break;
+      case 'line':
+        this.backend.drawLine(drawObj);
+        break;
+      case 'wire':
+        this.backend.drawWire(drawObj);
+        break;
+      case 'text':
+        this.backend.drawText(drawObj.x, drawObj.y, drawObj.text || '');
+        break;
+      case 'junction':
+        this.backend.drawJunction(drawObj);
+        break;
+      case 'wire-junction':
+        this.backend.drawWireJunction(drawObj);
+        break;
+      case 'wire-noconnect':
+        this.backend.drawWireNoConnect(drawObj);
+        break;
+    }
+  }
+
+  _drawEditCursor(editContext) {
+    if (!this.editingObjectId) return;
+
+    const state = this.history.getState();
+    const page = state.project.pages.find(p => p.id === state.activePageId);
+    if (!page) return;
+
+    const obj = page.objects.find(o => o.id === this.editingObjectId);
+    if (!obj || (obj.type !== 'box' && obj.type !== 'symbol')) return;
+
+    const hasBorder = obj.style && obj.style !== 'none';
+    const borderOffset = hasBorder ? 1 : 0;
+    const innerWidth = hasBorder ? obj.width - 2 : obj.width;
+    const innerHeight = hasBorder ? obj.height - 2 : obj.height;
+    const lines = (obj.text || '').split('\n');
+    const displayLines = lines.slice(0, Math.max(innerHeight, 1));
+
+    const justify = obj.textJustify || 'center-center';
+    const [vAlign, hAlign] = justify.split('-');
+
+    let startY;
+    if (vAlign === 'top') {
+      startY = obj.y + borderOffset;
+    } else if (vAlign === 'bottom') {
+      startY = obj.y + obj.height - borderOffset - displayLines.length;
+    } else {
+      startY = obj.y + borderOffset + Math.floor((innerHeight - displayLines.length) / 2);
+    }
+
+    const lineIndex = Math.min(editContext.cursorPosition.line, displayLines.length);
+    const lineText = displayLines[lineIndex] || '';
+    const cursorCol = Math.min(editContext.cursorPosition.col, innerWidth);
+
+    let lineStartX;
+    if (hAlign === 'left') {
+      lineStartX = obj.x + borderOffset;
+    } else if (hAlign === 'right') {
+      lineStartX = obj.x + obj.width - borderOffset - lineText.length;
+    } else {
+      lineStartX = obj.x + borderOffset + Math.floor((innerWidth - lineText.length) / 2);
+    }
+
+    const cursorX = lineStartX + cursorCol;
+    const cursorY = startY + lineIndex;
+
+    // Draw cursor using overlay
+    if (this.overlay) {
+      this.overlay.drawTextCursor(cursorX, cursorY, true);
+    }
   }
 
   updateUI() {
@@ -2564,23 +3160,19 @@ AsciiEditor.Editor = class Editor {
     const page = state.project.pages.find(p => p.id === state.activePageId);
     if (!page) return;
 
-    const buffer = [];
-    for (let r = 0; r < page.height; r++) {
-      buffer.push(new Array(page.width).fill(' '));
-    }
-
-    page.objects.forEach(obj => {
-      this.renderObjectToBuffer(buffer, obj);
+    // Use the new ASCIIExporter
+    const exporter = new AsciiEditor.export.ASCIIExporter();
+    const ascii = exporter.export(state, {
+      includeDerived: true,
+      includeShadows: true
     });
 
-    const ascii = buffer.map(row => row.join('')).join('\n');
-
-    const blob = new Blob([ascii], { type: 'text/plain' });
+    const blob = new Blob([ascii], { type: exporter.getMimeType() });
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = (page.name || 'diagram') + '.txt';
+    a.download = (page.name || 'diagram') + '.' + exporter.getFileExtension();
     a.click();
 
     URL.revokeObjectURL(url);

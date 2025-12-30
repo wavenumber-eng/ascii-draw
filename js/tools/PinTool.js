@@ -25,7 +25,10 @@ AsciiEditor.tools.PinTool = class PinTool extends AsciiEditor.tools.Tool {
     this.cursor = 'none';
     this.currentPos = null;
     this.shapeIndex = 0; // Current pin shape
-    this.hoveredEdge = null; // { symbol, edge, offset, position }
+    this.hoveredEdge = null; // { symbolId, edge, offset, position }
+
+    // Domain modules for clean separation
+    this.SymbolDomain = AsciiEditor.domain.Symbol;
   }
 
   activate(context) {
@@ -44,7 +47,9 @@ AsciiEditor.tools.PinTool = class PinTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseMove(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
     this.currentPos = { col, row };
 
     // Check if hovering over a symbol edge
@@ -56,7 +61,9 @@ AsciiEditor.tools.PinTool = class PinTool extends AsciiEditor.tools.Tool {
   onMouseDown(event, context) {
     if (event.button !== 0) return false;
 
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
 
     // Only create pin if on a symbol edge
     const edge = this.findSymbolEdge(col, row, context);
@@ -112,44 +119,24 @@ AsciiEditor.tools.PinTool = class PinTool extends AsciiEditor.tools.Tool {
   /**
    * Find if a point is on a symbol edge (ON the border)
    * OBJ-5J2: Pins CANNOT be placed on corner cells
-   * Returns { symbolId, edge, offset, position } or null
+   * Delegates to domain.Symbol.findSymbolEdgeAtPoint
+   * @returns { symbolId, edge, offset, position } or null
    */
   findSymbolEdge(col, row, context) {
     const state = context.history.getState();
     const page = state.project.pages.find(p => p.id === state.activePageId);
     if (!page) return null;
 
-    const symbols = page.objects.filter(o => o.type === 'symbol');
+    const result = this.SymbolDomain.findSymbolEdgeAtPoint(col, row, page.objects);
+    if (!result) return null;
 
-    for (const symbol of symbols) {
-      const { x, y, width, height } = symbol;
-
-      // Check left edge (excluding corners - row must be > y and < y + height - 1)
-      if (col === x && row > y && row < y + height - 1) {
-        const offset = height > 2 ? (row - y) / (height - 1) : 0.5;
-        return { symbolId: symbol.id, edge: 'left', offset, position: { col, row } };
-      }
-
-      // Check right edge (excluding corners)
-      if (col === x + width - 1 && row > y && row < y + height - 1) {
-        const offset = height > 2 ? (row - y) / (height - 1) : 0.5;
-        return { symbolId: symbol.id, edge: 'right', offset, position: { col, row } };
-      }
-
-      // Check top edge (excluding corners)
-      if (row === y && col > x && col < x + width - 1) {
-        const offset = width > 2 ? (col - x) / (width - 1) : 0.5;
-        return { symbolId: symbol.id, edge: 'top', offset, position: { col, row } };
-      }
-
-      // Check bottom edge (excluding corners)
-      if (row === y + height - 1 && col > x && col < x + width - 1) {
-        const offset = width > 2 ? (col - x) / (width - 1) : 0.5;
-        return { symbolId: symbol.id, edge: 'bottom', offset, position: { col, row } };
-      }
-    }
-
-    return null;
+    // Convert { symbol, edge, offset, position } to { symbolId, edge, offset, position }
+    return {
+      symbolId: result.symbol.id,
+      edge: result.edge,
+      offset: result.offset,
+      position: result.position
+    };
   }
 
   renderOverlay(ctx, context) {

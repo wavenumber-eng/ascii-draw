@@ -21,32 +21,45 @@ This is conceptually identical to **tile-based engines** from 8-bit and 16-bit g
 │              Cell dimensions: CONFIGURABLE                      │
 └─────────────────────────────────────────────────────────────────┘
                               │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌──────────────────────────┐    ┌──────────────────────────┐
-│   VIEWPORT (interactive) │    │   EXPORT (file output)   │
-│   ┌──────────────────┐   │    │   ┌──────────────────┐   │
-│   │ Canvas2D         │   │    │   │ ASCII text       │   │
-│   │ (current)        │   │    │   │ (current)        │   │
-│   ├──────────────────┤   │    │   ├──────────────────┤   │
-│   │ Three.js         │   │    │   │ SVG file         │   │
-│   │ (90°/iso/tilt)   │   │    │   ├──────────────────┤   │
-│   └──────────────────┘   │    │   │ HTML file        │   │
-└──────────────────────────┘    └──────────────────────────┘
-              │
-              ▼
-┌──────────────────────────┐
-│   RENDER BACKEND         │
-│   (what fills cells)     │
-│   ┌──────────────────┐   │
-│   │ ASCII chars      │   │
-│   ├──────────────────┤   │
-│   │ SVG elements     │   │
-│   ├──────────────────┤   │
-│   │ Extruded 3D      │   │
-│   └──────────────────┘   │
-└──────────────────────────┘
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│  DOMAIN LOGIC    │ │ VIEWPORT         │ │ EXPORT           │
+│  (business rules)│ │ (interactive)    │ │ (file output)    │
+│  ┌────────────┐  │ │ ┌────────────┐   │ │ ┌────────────┐   │
+│  │ Wire.js    │  │ │ │ Canvas2D   │   │ │ │ ASCII text │   │
+│  │ Symbol.js  │  │ │ │ Three.js   │   │ │ │ SVG file   │   │
+│  │ Line.js    │  │ │ └────────────┘   │ │ │ HTML file  │   │
+│  └────────────┘  │ └──────────────────┘ └──────────────────┘
+└──────────────────┘          │
+                              ▼
+                    ┌──────────────────┐
+                    │ RENDER BACKEND   │
+                    │ (glyph → visual) │
+                    │ ┌────────────┐   │
+                    │ │ ASCII char │   │
+                    │ │ Sprite     │   │
+                    │ │ SVG path   │   │
+                    │ │ 3D mesh    │   │
+                    │ └────────────┘   │
+                    └──────────────────┘
 ```
+
+### Cell Content as Glyphs
+
+Each cell stores a **character glyph** — this is the semantic data. How that glyph is rendered is determined by the render backend:
+
+| Glyph | ASCII Backend | Sprite Backend | SVG Backend |
+|-------|--------------|----------------|-------------|
+| `─` | `fillText("─")` | `drawImage(tile_horizontal)` | `<line x1.../>` |
+| `│` | `fillText("│")` | `drawImage(tile_vertical)` | `<line y1.../>` |
+| `┌` | `fillText("┌")` | `drawImage(tile_corner_tl)` | `<path d="..."/>` |
+
+This separation means the same document can be rendered as:
+- ASCII text (current)
+- Pixel art sprites (retro style)
+- Clean vector graphics (SVG)
+- 3D extruded blocks (Three.js)
 
 ### Cell Dimensions
 
@@ -65,12 +78,77 @@ The rendering backend maps cells to visual output. The object model and tools ar
 | Layer | Responsibility | Knows About |
 |-------|----------------|-------------|
 | **Object Model** | Data structures for boxes, lines, symbols | Cell coordinates only |
-| **Tools** | User interaction, hit testing, commands | Cell coordinates, IViewport |
+| **Domain Logic** | Business rules for objects (Wire, Symbol, Line) | Object relationships, validation |
+| **Tools** | User interaction, mouse/keyboard → commands | Cell coordinates, IViewport, Domain |
 | **Viewport** | Coordinate transforms, camera, events | Screen ↔ Cell mapping |
 | **Render Backend** | Visual representation of cells | How to draw cells |
 | **Exporter** | File output | How to serialize cells |
 
 Tools should **never** know whether they're running in a 2D canvas or a Three.js 3D environment. They receive cell coordinates from the viewport and operate on the object model.
+
+### Domain Logic Layer
+
+Domain logic modules contain **business rules** that are:
+- Independent of UI/mouse events
+- Reusable across multiple tools
+- Unit testable in isolation
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      DOMAIN MODULES                              │
+├─────────────────────────────────────────────────────────────────┤
+│  Wire.js                                                        │
+│  ├─ isFloatingEndpoint(wire, endIndex, objects)                 │
+│  ├─ findPinAtPoint(col, row, objects)                           │
+│  ├─ canBindToPin(wireEndpoint, pin)                             │
+│  ├─ getConnectedWires(wire, objects)                            │
+│  └─ moveEndpointWithSymbol(wire, symbol, delta)                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Symbol.js                                                      │
+│  ├─ getPinWorldPosition(symbol, pin)                            │
+│  ├─ findSymbolEdge(col, row, symbol)                            │
+│  ├─ getNextDesignatorNumber(prefix, objects)                    │
+│  └─ isPinOnEdge(symbol, pin)                                    │
+├─────────────────────────────────────────────────────────────────┤
+│  Line.js                                                        │
+│  ├─ getSegments(line)                                           │
+│  ├─ pointOnSegment(col, row, segment)                           │
+│  ├─ findIntersections(lines)                                    │
+│  └─ mergeLines(line1, line2)                                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why this matters:**
+
+Before (logic in tools):
+```javascript
+// SelectTool.js - 2700+ lines, wire logic mixed with mouse handling
+onMouseMove(event, context) {
+  // 50 lines of wire endpoint detection
+  // 30 lines of pin binding logic
+  // 20 lines of floating end detection
+  // ... impossible to unit test
+}
+```
+
+After (domain modules):
+```javascript
+// SelectTool.js - thin, just UI
+onMouseMove(event, context) {
+  const pin = Wire.findPinAtPoint(col, row, objects);
+  if (pin && Wire.canBindToPin(this.draggedEndpoint, pin)) {
+    this.showBindingHint(pin);
+  }
+}
+
+// test/domain/Wire.test.js - easy to test
+test('findPinAtPoint returns pin at exact position', () => {
+  const objects = [createSymbolWithPin(10, 5, 'left')];
+  const result = Wire.findPinAtPoint(10, 5, objects);
+  expect(result).not.toBeNull();
+  expect(result.pin.edge).toBe('left');
+});
+```
 
 ---
 
@@ -138,47 +216,56 @@ ascii_draw/
 └── .gitignore
 ```
 
-### Future Directories (Planned)
+### Implemented Directories
 
-These directories will be added as features are implemented:
+These directories have been implemented:
 
 ```
 js/
-├── viewport/                 # Viewport implementations [NEW]
+├── viewport/                 # Viewport implementations ✅
 │   ├── IViewport.js          # Interface definition
-│   ├── Canvas2DViewport.js   # Current 2D canvas (refactored from Editor)
+│   ├── Canvas2DViewport.js   # 2D canvas viewport
 │   └── ThreeJSViewport.js    # Three.js 3D viewport (experimental)
 │
-├── backends/                 # Render backend implementations [NEW]
+├── backends/                 # Render backend implementations ✅
 │   ├── IRenderBackend.js     # Content rendering interface
-│   ├── CanvasASCIIBackend.js # Current renderer (refactored)
+│   └── CanvasASCIIBackend.js # ASCII renderer
+│
+├── overlays/                 # Overlay renderer implementations ✅
+│   ├── IOverlayRenderer.js   # UI overlay interface
+│   └── Canvas2DOverlay.js    # 2D canvas overlay
+│
+├── export/                   # Export formats ✅
+│   ├── IExporter.js          # Interface definition
+│   └── ASCIIExporter.js      # Plain text export
+│
+├── domain/                   # Domain logic (pure functions) ✅ NEW
+│   ├── Line.js               # Point/segment utilities, intersections
+│   ├── Symbol.js             # Pin positions, edge detection
+│   └── Wire.js               # Binding, floating ends, merging
+│
+├── tools/                    # All tools implemented ✅
+│   ├── SelectTool.js         # Selection, move, resize
+│   ├── BoxTool.js            # Text boxes
+│   ├── TextTool.js           # Borderless text
+│   ├── LineTool.js           # Lines/polylines
+│   ├── SymbolTool.js         # Schematic symbols
+│   ├── WireTool.js           # Electrical wires
+│   └── PinTool.js            # Add pins to symbols
+```
+
+### Future Directories (Planned)
+
+```
+js/
+├── backends/                 # Additional backends (future)
 │   ├── ThreeJSASCIIBackend.js# ASCII in Three.js (text meshes)
 │   └── ThreeJSSVGBackend.js  # SVG elements in Three.js
 │
-├── overlays/                 # Overlay renderer implementations [NEW]
-│   ├── IOverlayRenderer.js   # UI overlay interface
-│   ├── Canvas2DOverlay.js    # Current overlay (refactored from Renderer)
-│   └── ThreeJSOverlay.js     # 2D canvas over WebGL (or 3D billboards)
-│
-├── export/                   # Export formats (file output)
-│   ├── IExporter.js          # Interface definition
-│   ├── ASCIIExporter.js      # Plain text export (current)
+├── export/                   # Additional export formats (future)
 │   ├── ANSIExporter.js       # Terminal escape codes
 │   ├── HTMLExporter.js       # Styled HTML
 │   └── SVGExporter.js        # Vector graphics
-│
-├── domain/                   # Domain logic (extracted from tools) [NEW]
-│   ├── Wire.js               # Wire utilities (floating ends, bindings)
-│   ├── Symbol.js             # Symbol utilities (pin positions)
-│   └── Line.js               # Line utilities (junctions, segments)
-│
-├── tools/
-│   ├── TextTool.js           # [TOOL-22] - implemented
-│   ├── LineTool.js           # [TOOL-23] - implemented
-│   ├── SymbolTool.js         # [TOOL-24] - partial
-│   ├── WireTool.js           # [TOOL-25] - implemented
-│   ├── PortTool.js           # [TOOL-26] - not implemented
-│   └── PowerTool.js          # [TOOL-27] - not implemented
 │
 ├── objects/                  # Object type definitions (future)
 │   ├── ObjectRegistry.js

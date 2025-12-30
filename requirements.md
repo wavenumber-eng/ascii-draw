@@ -1002,25 +1002,37 @@ Defines the order in which elements are drawn. Higher layers overwrite lower lay
 | Data Model (DATA) | 10 | 15 | 67% |
 | Export (EXP) | 2 | 20 | 10% |
 | Visual (VIS) | 10 | 11 | 91% |
+| **Domain Logic (DOM)** | **17** | **17** | **100%** ✅ |
 
-### Priority Track A: Pluggable Architecture (Foundation)
+### Priority Track A: Domain Logic Extraction ✅ COMPLETE
 
-1. **VIEW-1 to VIEW-4** - IViewport interface and abstraction
-2. **BACK-1 to BACK-4** - IRenderBackend interface (content only)
-3. **OVER-1 to OVER-4** - IOverlayRenderer interface (UI only)
-4. **Refactor Editor.js** - Use viewport abstraction
-5. **Refactor Renderer.js** - Split into CanvasASCIIBackend + Canvas2DOverlay
-6. **Refactor tools** - Use viewport.screenToCell()
-7. **CELL-1 to CELL-5** - Configurable cell dimensions
+Domain modules extracted with 107 unit tests passing.
 
-### Priority Track B: Three.js Experiment
+1. ✅ **DOM-10 to DOM-15** - Wire.js domain module
+2. ✅ **DOM-20 to DOM-24** - Symbol.js domain module
+3. ✅ **DOM-30 to DOM-33** - Line.js domain module
+4. ✅ **Refactor SelectTool.js** - Uses domain modules
+5. ✅ **Refactor WireTool.js** - Uses domain modules
+6. ✅ **Unit tests** - 107 tests in test/domain/
+7. ✅ **Bundled:** Removed all legacy `grid.pixelToChar()` fallbacks
 
-1. **VIEW-20 to VIEW-28** - ThreeJSViewport implementation
-2. **MapControls integration** - Pan, zoom, tilt
-3. **ThreeJSASCIIBackend** - Text rendering in Three.js
-4. **Camera presets** - Top-down, isometric
+### Priority Track B: Pluggable Architecture (Mostly Complete)
 
-### Priority Track C: Feature Completion (Existing)
+1. ✅ **VIEW-1 to VIEW-4** - IViewport interface and abstraction
+2. ✅ **BACK-1 to BACK-4** - IRenderBackend interface (content only)
+3. ✅ **OVER-1 to OVER-4** - IOverlayRenderer interface (UI only)
+4. 🔄 **Refactor tools** - Remove legacy fallbacks (bundled with Track A)
+5. ⏸️ **Migrate overlays** - Move tool `renderOverlay()` to Canvas2DOverlay (deferred - works as-is)
+6. **CELL-1 to CELL-5** - Configurable cell dimensions (partial)
+
+### Priority Track C: Three.js Experiment (Partial)
+
+1. ✅ **VIEW-20 to VIEW-28** - ThreeJSViewport implementation
+2. ✅ **MapControls integration** - Pan, zoom, shift+right-click rotate
+3. ✅ **Camera presets** - Alt+1-5 for top, angle, iso, front, side
+4. ❌ **ThreeJSASCIIBackend** - Using texture approach instead
+
+### Priority Track D: Feature Completion
 
 1. **TOOL-24 (SymbolTool)** - Create symbols like boxes with designator/parameters
 2. **OBJ-50 to OBJ-5D** - Symbol object model (box properties + designator + parameters)
@@ -1073,6 +1085,49 @@ npm test -- export    # Run only export tests
 ---
 
 ## 14. Architecture
+
+### Domain Logic Modules
+
+Domain modules contain business logic that is independent of UI/tool interaction. This enables unit testing and code reuse across tools.
+
+#### Wire Domain Module
+
+| Status | ID | Requirement | Description |
+|--------|-----|-------------|-------------|
+| [x] | **DOM-10** | `Wire.isFloatingEndpoint()` | Detect if wire endpoint is unbound |
+| [x] | **DOM-11** | `Wire.findPinAtPoint()` | Find symbol pin at cell position |
+| [x] | **DOM-12** | `Wire.canBindToPin()` | Validate wire-to-pin binding |
+| [x] | **DOM-13** | `Wire.getConnectedWires()` | Find wires connected via junctions |
+| [x] | **DOM-14** | `Wire.moveEndpointWithSymbol()` | Calculate endpoint position after symbol move |
+| [x] | **DOM-15** | `Wire.findFloatingEnds()` | Find all unbound endpoints in document |
+
+#### Symbol Domain Module
+
+| Status | ID | Requirement | Description |
+|--------|-----|-------------|-------------|
+| [x] | **DOM-20** | `Symbol.getPinWorldPosition()` | Calculate pin position from symbol + edge + offset |
+| [x] | **DOM-21** | `Symbol.findSymbolEdge()` | Determine which edge a point is on |
+| [x] | **DOM-22** | `Symbol.getNextDesignatorNumber()` | Get next available number for prefix |
+| [x] | **DOM-23** | `Symbol.isPinOnEdge()` | Validate pin placement on symbol edge |
+| [x] | **DOM-24** | `Symbol.getAllPinPositions()` | Get world positions for all pins on symbol |
+
+#### Line Domain Module
+
+| Status | ID | Requirement | Description |
+|--------|-----|-------------|-------------|
+| [x] | **DOM-30** | `Line.getSegments()` | Extract segments from polyline |
+| [x] | **DOM-31** | `Line.pointOnSegment()` | Test if point lies on segment |
+| [x] | **DOM-32** | `Line.findIntersections()` | Find all line crossing points |
+| [x] | **DOM-33** | `Line.mergeLines()` | Combine two lines at common endpoint |
+
+#### Domain Architecture Requirements
+
+| Status | ID | Requirement | Description |
+|--------|-----|-------------|-------------|
+| [x] | **DOM-1** | Domain modules are pure functions | No UI, no canvas, no events |
+| [x] | **DOM-2** | Domain modules are unit testable | Full test coverage for logic |
+| [x] | **DOM-3** | Tools delegate to domain modules | No duplicate business logic |
+| [x] | **DOM-4** | Domain modules in `js/domain/` directory | Clean separation |
 
 ### Clean Separation: Tools → State → Derive → Render
 

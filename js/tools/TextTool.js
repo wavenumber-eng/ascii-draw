@@ -35,7 +35,9 @@ AsciiEditor.tools.TextTool = class TextTool extends AsciiEditor.tools.Tool {
   onMouseDown(event, context) {
     if (event.button !== 0) return false;
 
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
     this.dragStart = { col, row };
     this.dragCurrent = { col, row };
     this.dragging = true;
@@ -43,7 +45,9 @@ AsciiEditor.tools.TextTool = class TextTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseMove(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
     this.currentPos = { x: col, y: row };
 
     if (this.dragging) {
@@ -55,7 +59,9 @@ AsciiEditor.tools.TextTool = class TextTool extends AsciiEditor.tools.Tool {
   onMouseUp(event, context) {
     if (!this.dragging) return false;
 
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
     this.dragCurrent = { col, row };
 
     // Calculate bounds

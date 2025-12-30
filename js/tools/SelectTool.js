@@ -37,6 +37,11 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     this.mode = SelectMode.NONE;
     this.dragStart = null;
     this.dragCurrent = null;
+
+    // Domain modules for clean separation
+    this.LineDomain = AsciiEditor.domain.Line;
+    this.SymbolDomain = AsciiEditor.domain.Symbol;
+    this.WireDomain = AsciiEditor.domain.Wire;
     // Line point dragging state
     this.linePointIndex = null;       // Index of point being dragged
     this.lineOriginalPoints = null;   // Original points array for undo
@@ -105,15 +110,23 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseDown(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Ignore right-click - let Editor handle it for panning
+    if (event.button === 2) return false;
+
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
+    // Use content-space pixels for sub-cell precision
+    const pixelX = event.pixelX;
+    const pixelY = event.pixelY;
     const state = context.history.getState();
     this.addToSelection = event.ctrlKey;
-    this.dragStart = { col, row, pixelX: event.canvasX, pixelY: event.canvasY };
-    this.dragCurrent = { col, row };
+    this.dragStart = { col, row, pixelX, pixelY };
+    this.dragCurrent = { col, row, pixelX, pixelY };
 
     // Check for resize handle hit (single selection only) - SEL-22
     if (state.selection.ids.length === 1) {
-      const handle = this.hitTestHandle(event.canvasX, event.canvasY, context);
+      const handle = this.hitTestHandle(pixelX, pixelY, context);
       if (handle) {
         if (handle.type === 'line_point') {
           // Start dragging a line vertex
@@ -357,8 +370,13 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseMove(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-    this.dragCurrent = { col, row, pixelX: event.canvasX, pixelY: event.canvasY };
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
+    // Use content-space pixels for sub-cell precision
+    const pixelX = event.pixelX;
+    const pixelY = event.pixelY;
+    this.dragCurrent = { col, row, pixelX, pixelY };
 
     if (this.mode === SelectMode.DRAGGING && this.draggedIds.length > 0) {
       // Move all selected objects
@@ -421,7 +439,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     // Update cursor based on what's under mouse
     const state = context.history.getState();
     if (state.selection.ids.length === 1) {
-      const handle = this.hitTestHandle(event.canvasX, event.canvasY, context);
+      const handle = this.hitTestHandle(pixelX, pixelY, context);
       if (handle) {
         if (handle.type === 'line_point') {
           context.canvas.style.cursor = 'move';
@@ -442,7 +460,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseUp(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
 
     if (this.mode === SelectMode.DRAGGING && this.draggedIds.length > 0) {
       const dx = col - this.dragStart.col;
@@ -725,7 +745,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
   // SEL-30: Double-click to edit
   onDoubleClick(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
 
     // OBJ-5A: Check for label double-click first
     const labelHit = this.hitTestLabel(col, row, context);
@@ -1777,47 +1799,16 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   // Find if a point is on a symbol edge (excluding corners)
+  // Delegates to domain.Symbol.findSymbolEdgeAtPoint
   // Returns { symbol, edge, offset } or null
   findSymbolEdge(point, objects) {
-    const symbols = objects.filter(o => o.type === 'symbol');
-
-    for (const symbol of symbols) {
-      const { x, y, width, height } = symbol;
-
-      // Check left edge (excluding corners)
-      if (point.x === x && point.y > y && point.y < y + height - 1) {
-        const offset = height > 2 ? (point.y - y) / (height - 1) : 0.5;
-        return { symbol, edge: 'left', offset };
-      }
-
-      // Check right edge (excluding corners)
-      if (point.x === x + width - 1 && point.y > y && point.y < y + height - 1) {
-        const offset = height > 2 ? (point.y - y) / (height - 1) : 0.5;
-        return { symbol, edge: 'right', offset };
-      }
-
-      // Check top edge (excluding corners)
-      if (point.y === y && point.x > x && point.x < x + width - 1) {
-        const offset = width > 2 ? (point.x - x) / (width - 1) : 0.5;
-        return { symbol, edge: 'top', offset };
-      }
-
-      // Check bottom edge (excluding corners)
-      if (point.y === y + height - 1 && point.x > x && point.x < x + width - 1) {
-        const offset = width > 2 ? (point.x - x) / (width - 1) : 0.5;
-        return { symbol, edge: 'bottom', offset };
-      }
-    }
-    return null;
+    return this.SymbolDomain.findSymbolEdgeAtPoint(point.x, point.y, objects);
   }
 
   // Find existing pin at symbol edge position
+  // Delegates to domain.Symbol.findPinAtEdge
   findPinAtEdge(symbol, edge, offset) {
-    if (!symbol.pins) return null;
-    const tolerance = 0.05;
-    return symbol.pins.find(pin =>
-      pin.edge === edge && Math.abs(pin.offset - offset) < tolerance
-    );
+    return this.SymbolDomain.findPinAtEdge(symbol, edge, offset);
   }
 
   // Bind wire endpoint to pin, auto-creating pin if needed
@@ -1868,32 +1859,19 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     };
   }
 
-  // Calculate pin world position (same logic as Renderer)
+  // Calculate pin world position
+  // Delegates to domain.Symbol.getPinPosition
   getPinPosition(symbol, pin) {
-    const { x, y, width, height } = symbol;
-    const offset = pin.offset || 0.5;
-
-    switch (pin.edge) {
-      case 'left':
-        return { x: x, y: Math.floor(y + offset * (height - 1)) };
-      case 'right':
-        return { x: x + width - 1, y: Math.floor(y + offset * (height - 1)) };
-      case 'top':
-        return { x: Math.floor(x + offset * (width - 1)), y: y };
-      case 'bottom':
-        return { x: Math.floor(x + offset * (width - 1)), y: y + height - 1 };
-      default:
-        return { x: x, y: y };
-    }
+    const pos = this.SymbolDomain.getPinPosition(symbol, pin);
+    // Convert {col, row} to {x, y} for compatibility
+    return { x: pos.col, y: pos.row };
   }
 
   // OBJ-69: Find all wires bound to a symbol
+  // Delegates to domain.Wire.findWiresBoundToSymbol
   findWiresBoundToSymbol(symbolId, objects) {
-    return objects.filter(obj => {
-      if (obj.type !== 'wire') return false;
-      return (obj.startBinding?.symbolId === symbolId) ||
-             (obj.endBinding?.symbolId === symbolId);
-    });
+    return this.WireDomain.findWiresBoundToSymbol(symbolId, objects)
+      .map(entry => entry.wire);
   }
 
   // OBJ-67: Update wire endpoints based on pin positions after symbol move

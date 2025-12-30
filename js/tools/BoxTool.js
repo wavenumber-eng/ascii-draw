@@ -28,7 +28,9 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseDown(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
 
     // TOOL-21A/B: Two-click interaction
     if (!this.drawing) {
@@ -79,8 +81,8 @@ AsciiEditor.tools.BoxTool = class BoxTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseMove(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-    this.currentPos = { col, row };
+    // Use col/row from event (viewport handles coordinate conversion)
+    this.currentPos = { col: event.col, row: event.row };
     return true; // Always redraw for crosshair
   }
 

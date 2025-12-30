@@ -8,6 +8,36 @@ This document outlines the implementation phases, specific tasks, and test requi
 
 ---
 
+## Current Status (Updated 2024-12)
+
+### Phase Status Overview
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: Interface Definitions | ✅ COMPLETE | All interface files created |
+| Phase 2: Extract Canvas2D | ✅ COMPLETE | Legacy fallbacks removed from all tools |
+| Phase 3: Domain Logic | ✅ COMPLETE | Wire.js, Symbol.js, Line.js with 107 tests |
+| Phase 4: Exporters | ✅ COMPLETE | ASCIIExporter working |
+| Phase 5: Three.js | ⚠️ PARTIAL | Viewport works, no separate backend (uses texture) |
+| Phase 6: Cell Config | ⚠️ PARTIAL | Constructor params only, not runtime |
+
+### What's Working
+
+- **Viewport abstraction**: Editor uses `viewport.screenToCell()` for coordinate transforms
+- **Render backend**: Editor calls `backend.drawBox()`, `backend.drawLine()`, etc.
+- **3D viewport**: ThreeJSViewport works with MapControls, view presets (Alt+1-5)
+- **ASCII export**: ASCIIExporter produces correct output
+- **Domain modules**: Pure functions for Wire, Symbol, Line business logic with full test coverage
+- **Tools refactored**: All tools use domain modules, legacy `grid.pixelToChar()` fallbacks removed
+
+### What Needs Work
+
+1. **Overlay rendering in tools** - Tools draw directly to canvas in `renderOverlay()` (deferred - current approach works)
+2. **Three.js backend** - Currently uses texture-based approach, not proper 3D text rendering
+3. **Runtime cell config** - Cell dimensions only configurable at construction time
+
+---
+
 ## Overview
 
 The refactor transforms the current monolithic rendering system into a pluggable architecture with:
@@ -496,9 +526,25 @@ getCell(event, context) {
 
 ---
 
-## Phase 3: Extract Domain Logic
+## Phase 3: Extract Domain Logic ✅ COMPLETE
 
 **Goal:** Extract business logic from tools into reusable domain modules.
+
+**Status:** COMPLETE - Domain modules created with 107 unit tests passing.
+
+**Completed Work:**
+- Created `js/domain/Line.js` - Point utilities, segments, intersections, path generation
+- Created `js/domain/Symbol.js` - Bounds, edge detection, pin positioning (SINGLE SOURCE OF TRUTH)
+- Created `js/domain/Wire.js` - Binding, floating endpoints, wire merging, rubberbanding
+- Refactored all tools to use domain modules
+- Removed all legacy `grid.pixelToChar()` fallbacks from tools
+- Added 107 unit tests in `test/domain/`
+
+**Why This Matters:**
+- Wire behavior has complex coupling (pin binding, floating ends, routing)
+- Current bugs are hard to isolate because logic is mixed with mouse handlers
+- Unit tests can validate wire/symbol behavior without UI mocking
+- New tools can reuse domain logic instead of reimplementing
 
 ### 3.1 Create Domain Modules
 
@@ -1205,20 +1251,23 @@ require('../js/export/ASCIIExporter.js');
 
 ---
 
-## Timeline Estimates (Not Calendar Time)
+## Priority and Effort
 
-| Phase | Effort | Dependencies |
-|-------|--------|--------------|
-| Phase 1: Interfaces | Small | None |
-| Phase 2: Extract Canvas2D | Large | Phase 1 |
-| Phase 3: Domain Logic | Medium | Phase 2 |
-| Phase 4: Exporters | Medium | Phase 2 |
-| Phase 5: Three.js | Large | Phase 2, 3 |
-| Phase 6: Cell Config | Small | Phase 2 |
+| Phase | Status | Effort | Priority |
+|-------|--------|--------|----------|
+| Phase 1: Interfaces | ✅ DONE | Small | - |
+| Phase 2: Extract Canvas2D | ✅ DONE | Large | - |
+| Phase 3: Domain Logic | ✅ DONE | Medium | - |
+| Phase 4: Exporters | ✅ DONE | Medium | - |
+| Phase 5: Three.js | ⚠️ 60% | Large | Low (experimental) |
+| Phase 6: Cell Config | ⚠️ 30% | Small | Low |
 
-**Recommended Order:** 1 → 2 → 3 → 4 → 6 → 5
+**Current Priority Order:**
+1. **Bug fixes and feature work** - Architecture is stable, focus on functionality
+2. **Phase 5: Three.js improvements** (optional) - Proper 3D text rendering if needed
+3. **Phase 6: Runtime cell config** (optional) - If font flexibility is needed
 
-Phase 5 (Three.js) is experimental and can be done in parallel after Phase 2 is stable.
+The core architecture refactor is **COMPLETE**. Phases 5 and 6 are optional enhancements.
 
 ---
 
@@ -1257,17 +1306,18 @@ Phase 5 (Three.js) is experimental and can be done in parallel after Phase 2 is 
 - [ ] Interface tests pass
 - [ ] No changes to existing functionality
 
-### Phase 2 Complete When:
-- [ ] All tools use `viewport.screenToCell()`
-- [ ] All content rendering uses `CanvasASCIIBackend`
-- [ ] All overlay rendering uses `Canvas2DOverlay`
-- [ ] Existing test suite passes
-- [ ] No visual differences in rendered output
+### Phase 2 Complete When: ✅
+- [x] All tools use `viewport.screenToCell()` (via event.col/row)
+- [x] All content rendering uses `CanvasASCIIBackend`
+- [x] Legacy `grid.pixelToChar()` fallbacks removed from all tools
+- [ ] All overlay rendering uses `Canvas2DOverlay` (deferred - tools draw directly)
+- [x] Existing test suite passes
+- [x] No visual differences in rendered output
 
-### Phase 3 Complete When:
-- [ ] Domain modules created with full test coverage
-- [ ] Tools refactored to use domain modules
-- [ ] No duplicate logic between tools
+### Phase 3 Complete When: ✅
+- [x] Domain modules created with full test coverage (107 tests)
+- [x] Tools refactored to use domain modules
+- [x] No duplicate logic between tools (getPinPosition, findSymbolEdge consolidated)
 
 ### Phase 4 Complete When:
 - [ ] ASCIIExporter produces identical output to current export

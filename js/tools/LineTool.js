@@ -96,7 +96,9 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
     // Left-click adds points
     if (event.button !== 0) return false;
 
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
+    // Use col/row from event (viewport handles coordinate conversion)
+    const col = event.col;
+    const row = event.row;
     const clickPos = { x: col, y: row };
 
     if (!this.drawing) {
@@ -134,8 +136,8 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
   }
 
   onMouseMove(event, context) {
-    const { col, row } = context.grid.pixelToChar(event.canvasX, event.canvasY);
-    this.currentPos = { x: col, y: row };
+    // Use col/row from event (viewport handles coordinate conversion)
+    this.currentPos = { x: event.col, y: event.row };
     return true; // Always redraw for crosshair and connection indicators
   }
 
