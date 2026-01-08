@@ -538,25 +538,9 @@ AsciiEditor.rendering.Renderer = class Renderer {
 
   // Calculate world position of a pin (ON the symbol border)
   getPinWorldPosition(symbol, pin) {
-    const { x, y, width, height } = symbol;
-    const offset = pin.offset || 0.5;
-
-    switch (pin.edge) {
-      case 'left':
-        // Left edge: x stays at symbol left, y varies along height
-        return { x: x, y: Math.floor(y + offset * (height - 1)) };
-      case 'right':
-        // Right edge: x at symbol right border, y varies along height
-        return { x: x + width - 1, y: Math.floor(y + offset * (height - 1)) };
-      case 'top':
-        // Top edge: y at symbol top, x varies along width
-        return { x: Math.floor(x + offset * (width - 1)), y: y };
-      case 'bottom':
-        // Bottom edge: y at symbol bottom border, x varies along width
-        return { x: Math.floor(x + offset * (width - 1)), y: y + height - 1 };
-      default:
-        return { x: x, y: y };
-    }
+    // Delegate to domain Single Source of Truth
+    const pos = AsciiEditor.domain.Symbol.getPinPosition(symbol, pin);
+    return { x: pos.col, y: pos.row };
   }
 
   // OBJ-47: Draw junction with style-based character

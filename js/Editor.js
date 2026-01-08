@@ -1671,23 +1671,10 @@ AsciiEditor.Editor = class Editor {
     this.wirePinPropertyListeners(symbol, pinArray);
   }
 
-  // Calculate pin world position (same logic as Renderer)
+  // Calculate pin world position - delegates to domain Single Source of Truth
   getPinWorldPosition(symbol, pin) {
-    const { x, y, width, height } = symbol;
-    const offset = pin.offset || 0.5;
-
-    switch (pin.edge) {
-      case 'left':
-        return { x: x, y: Math.floor(y + offset * (height - 1)) };
-      case 'right':
-        return { x: x + width - 1, y: Math.floor(y + offset * (height - 1)) };
-      case 'top':
-        return { x: Math.floor(x + offset * (width - 1)), y: y };
-      case 'bottom':
-        return { x: Math.floor(x + offset * (width - 1)), y: y + height - 1 };
-      default:
-        return { x: x, y: y };
-    }
+    const pos = AsciiEditor.domain.Symbol.getPinPosition(symbol, pin);
+    return { x: pos.col, y: pos.row };
   }
 
   wirePinPropertyListeners(symbol, pins) {

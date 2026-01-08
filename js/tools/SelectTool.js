@@ -1357,6 +1357,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   // Calculate where a pin should be on an edge given a target position
+  // Delegates to domain for offset calculation
   calculatePinPositionOnEdge(symbol, currentEdge, targetX, targetY) {
     const { x, y, width, height } = symbol;
 
@@ -1365,12 +1366,14 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
     if (currentEdge === 'left' || currentEdge === 'right') {
       // Pin stays on same edge, Y determines offset
       const clampedY = Math.max(y + 1, Math.min(y + height - 2, targetY));
-      const offset = height > 2 ? (clampedY - y) / (height - 1) : 0.5;
+      const clampedX = (currentEdge === 'left') ? x : x + width - 1;
+      const offset = this.SymbolDomain.calculateEdgeOffset(clampedX, clampedY, symbol, currentEdge);
       return { edge: currentEdge, offset };
     } else if (currentEdge === 'top' || currentEdge === 'bottom') {
       // Pin stays on same edge, X determines offset
       const clampedX = Math.max(x + 1, Math.min(x + width - 2, targetX));
-      const offset = width > 2 ? (clampedX - x) / (width - 1) : 0.5;
+      const clampedY = (currentEdge === 'top') ? y : y + height - 1;
+      const offset = this.SymbolDomain.calculateEdgeOffset(clampedX, clampedY, symbol, currentEdge);
       return { edge: currentEdge, offset };
     }
 
@@ -1378,26 +1381,9 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   // Check if a pin at the given edge/offset would collide with another pin
+  // Delegates to domain Single Source of Truth
   checkPinCollision(symbol, excludePinId, edge, offset) {
-    if (!symbol.pins) return false;
-
-    const { width, height } = symbol;
-    const edgeLength = (edge === 'left' || edge === 'right') ? height : width;
-
-    // Calculate the cell position of the new offset
-    const newCell = Math.round(offset * (edgeLength - 1));
-
-    for (const otherPin of symbol.pins) {
-      if (otherPin.id === excludePinId) continue;
-      if (otherPin.edge !== edge) continue;
-
-      const otherCell = Math.round(otherPin.offset * (edgeLength - 1));
-      if (newCell === otherCell) {
-        return true; // Collision!
-      }
-    }
-
-    return false;
+    return this.SymbolDomain.checkPinCollision(symbol, edge, offset, excludePinId);
   }
 
   finalizeLineSegmentDrag(context) {
@@ -2048,60 +2034,21 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
   // Find which edge of a symbol is closest to a point
   // OBJ-5J2: Pins CANNOT be placed on corner cells
+  // Delegates to domain Single Source of Truth
   findClosestEdge(symbol, col, row) {
-    const { x, y, width, height } = symbol;
-
-    // Check if on left edge (excluding corners)
-    if (col === x && row > y && row < y + height - 1) {
-      const offset = height > 2 ? (row - y) / (height - 1) : 0.5;
-      return { edge: 'left', offset };
-    }
-    // Check if on right edge (excluding corners)
-    if (col === x + width - 1 && row > y && row < y + height - 1) {
-      const offset = height > 2 ? (row - y) / (height - 1) : 0.5;
-      return { edge: 'right', offset };
-    }
-    // Check if on top edge (excluding corners)
-    if (row === y && col > x && col < x + width - 1) {
-      const offset = width > 2 ? (col - x) / (width - 1) : 0.5;
-      return { edge: 'top', offset };
-    }
-    // Check if on bottom edge (excluding corners)
-    if (row === y + height - 1 && col > x && col < x + width - 1) {
-      const offset = width > 2 ? (col - x) / (width - 1) : 0.5;
-      return { edge: 'bottom', offset };
+    // First check if exactly on an edge (excluding corners)
+    const edge = this.SymbolDomain.findEdge(col, row, symbol);
+    if (edge) {
+      const offset = this.SymbolDomain.calculateEdgeOffset(col, row, symbol, edge);
+      return { edge, offset };
     }
 
-    // Not on any edge - find closest edge and clamp to exclude corners
-    const distLeft = Math.abs(col - x);
-    const distRight = Math.abs(col - (x + width - 1));
-    const distTop = Math.abs(row - y);
-    const distBottom = Math.abs(row - (y + height - 1));
-
-    const minDist = Math.min(distLeft, distRight, distTop, distBottom);
-
-    if (minDist === distLeft) {
-      // Clamp row to exclude corners (y+1 to y+height-2)
-      const clampedRow = Math.max(y + 1, Math.min(y + height - 2, row));
-      const offset = height > 2 ? (clampedRow - y) / (height - 1) : 0.5;
-      return { edge: 'left', offset };
+    // Not on edge - find closest edge (domain handles corner clamping)
+    const result = this.SymbolDomain.findClosestEdge(col, row, symbol);
+    if (result) {
+      return { edge: result.edge, offset: result.offset };
     }
-    if (minDist === distRight) {
-      // Clamp row to exclude corners
-      const clampedRow = Math.max(y + 1, Math.min(y + height - 2, row));
-      const offset = height > 2 ? (clampedRow - y) / (height - 1) : 0.5;
-      return { edge: 'right', offset };
-    }
-    if (minDist === distTop) {
-      // Clamp col to exclude corners (x+1 to x+width-2)
-      const clampedCol = Math.max(x + 1, Math.min(x + width - 2, col));
-      const offset = width > 2 ? (clampedCol - x) / (width - 1) : 0.5;
-      return { edge: 'top', offset };
-    }
-    // distBottom
-    const clampedCol = Math.max(x + 1, Math.min(x + width - 2, col));
-    const offset = width > 2 ? (clampedCol - x) / (width - 1) : 0.5;
-    return { edge: 'bottom', offset };
+    return null;
   }
 
   // Finalize pin drag with undo support
