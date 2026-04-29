@@ -24,6 +24,7 @@ AsciiEditor.tools.Tool = class Tool {
   onKeyUp(event, context) { return false; }
   onDoubleClick(event, context) { return false; }
 
-  // TOOL-4: Visual feedback
-  renderOverlay(ctx, context) {}
+  // TOOL-4: Visual feedback. Tools draw via the overlay's cell-coordinate API
+  // (see IOverlayRenderer). Tools must NOT access ctx, canvas, or cell dimensions.
+  renderOverlay(overlay, context) {}
 };

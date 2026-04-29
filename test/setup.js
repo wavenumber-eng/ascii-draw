@@ -18,7 +18,8 @@ if (!global.AsciiEditor || !global.AsciiEditor._initialized) {
     viewport: {},
     backends: {},
     overlays: {},
-    export: {}
+    export: {},
+    input: {}
   };
 
   // Helper to load script - strips namespace init and evals in current scope
@@ -29,7 +30,7 @@ if (!global.AsciiEditor || !global.AsciiEditor._initialized) {
     const lines = code.split('\n').filter(line => {
       const trimmed = line.trim();
       if (trimmed.startsWith('var AsciiEditor = AsciiEditor')) return false;
-      if (trimmed.match(/^AsciiEditor\.(core|domain|tools|rendering|viewport|backends|overlays|export)\s*=\s*AsciiEditor\.\1/)) return false;
+      if (trimmed.match(/^AsciiEditor\.(core|domain|tools|rendering|viewport|backends|overlays|export|input)\s*=\s*AsciiEditor\.\1/)) return false;
       return true;
     });
     code = lines.join('\n');
@@ -60,6 +61,9 @@ if (!global.AsciiEditor || !global.AsciiEditor._initialized) {
   loadScript('../js/viewport/Canvas2DViewport.js');
   loadScript('../js/backends/CanvasASCIIBackend.js');
   loadScript('../js/overlays/Canvas2DOverlay.js');
+
+  // Input routing
+  loadScript('../js/input/InputRouter.js');
 }
 
 // Note: Tools and Renderer need DOM/Canvas, load them in specific tests if needed

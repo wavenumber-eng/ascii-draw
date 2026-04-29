@@ -327,4 +327,62 @@ AsciiEditor.overlays.IOverlayRenderer = class IOverlayRenderer {
   getType() {
     throw new Error('IOverlayRenderer.getType() not implemented');
   }
+
+  // ============================================================
+  // Cell-coordinate primitives (the public Tool overlay API)
+  //
+  // Tools call ONLY these methods to draw overlays. They never
+  // touch the underlying ctx or cell dimensions. Each implementation
+  // is responsible for translating cell coords to its own space.
+  //
+  // All `opts` parameters take optional { color, ... } shape.
+  // Coordinates are in CELL units; some methods accept fractional
+  // values (e.g. segment-handle midpoints).
+  // ============================================================
+
+  /** Crosshair at cell center. opts: { color, size }. */
+  drawCrosshair(col, row, opts = {}) {}
+
+  /** ASCII glyph in one cell. opts: { color, font, bgColor }. */
+  drawCellGlyph(col, row, char, opts = {}) {}
+
+  /** Cell-range rectangle. opts: { strokeColor, fillColor, dash, lineWidth, sizeLabel }. */
+  drawCellRect(col, row, w, h, opts = {}) {}
+
+  /** Single-cell highlight with optional corner markers + label.
+   *  opts: { strokeColor, fillColor, label, labelColor, cornerMarkers, padding, lineWidth }. */
+  drawCellHighlight(col, row, opts = {}) {}
+
+  /** Small filled circle at cell center. opts: { color, radius }. */
+  drawDot(col, row, opts = {}) {}
+
+  /** Glowing connection ring with optional label.
+   *  opts: { color, glowColor, label, radius, withCenterDot }. */
+  drawConnectionRing(col, row, opts = {}) {}
+
+  /** Status label near a cell. opts: { color, font, dx, dy }. dx/dy in pixels. */
+  drawStatusLabel(col, row, text, opts = {}) {}
+
+  /** Red X error mark in a cell. opts: { color }. */
+  drawErrorMark(col, row, label, opts = {}) {}
+
+  /** Dashed leader line between two cells. opts: { color, dash, withStartDot }. */
+  drawLeaderLine(col1, row1, col2, row2, opts = {}) {}
+
+  /** Selection rect around a cell-bounds rect. bounds: {x,y,width,height}.
+   *  opts: { color, dash, padding, lineWidth }. */
+  drawSelectionRect(bounds, opts = {}) {}
+
+  /** Four corner handles for a cell-bounds rect. opts: { color, size }. */
+  drawCornerHandles(bounds, opts = {}) {}
+
+  /** Vertex handle (square + 4 diagonal arrows). opts: { color, size }. */
+  drawVertexHandleDecorated(col, row, opts = {}) {}
+
+  /** Segment handle (square + 2 axis arrows). orientation: 'h' or 'v'. */
+  drawSegmentHandleDecorated(col, row, orientation, opts = {}) {}
+
+  /** Render an ASCII polyline through points using a chars set { h,v,tl,tr,bl,br }.
+   *  Inserts corner glyphs automatically. opts: { color, font }. */
+  drawAsciiPath(points, chars, opts = {}) {}
 };

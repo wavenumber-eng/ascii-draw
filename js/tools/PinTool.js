@@ -34,7 +34,7 @@ AsciiEditor.tools.PinTool = class PinTool extends AsciiEditor.tools.Tool {
   activate(context) {
     this.currentPos = null;
     this.hoveredEdge = null;
-    context.canvas.style.cursor = this.cursor;
+    context.setCursor(this.cursor);
   }
 
   deactivate() {
@@ -139,68 +139,20 @@ AsciiEditor.tools.PinTool = class PinTool extends AsciiEditor.tools.Tool {
     };
   }
 
-  renderOverlay(ctx, context) {
-    const styles = getComputedStyle(document.documentElement);
-    const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
-    const grid = context.grid;
-
+  renderOverlay(overlay, context) {
     if (!this.currentPos) return;
-
-    const pixel = grid.charToPixel(this.currentPos.col, this.currentPos.row);
-    const cx = pixel.x + grid.charWidth / 2;
-    const cy = pixel.y + grid.charHeight / 2;
-
-    // Draw current pin shape at cursor
+    const { col, row } = this.currentPos;
     const shape = this.getCurrentShape();
-    ctx.font = '16px BerkeleyMono, monospace';
-    ctx.fillStyle = accent;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    ctx.fillText(shape.char, cx, cy);
 
-    // If hovering over symbol edge, show "PIN" indicator
+    overlay.drawCellGlyph(col, row, shape.char);
+
     if (this.hoveredEdge) {
-      ctx.fillStyle = accent;
-      ctx.font = '11px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText('PIN', pixel.x + grid.charWidth + 4, pixel.y - 2);
-
-      // Highlight the edge position
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(pixel.x, pixel.y, grid.charWidth, grid.charHeight);
+      overlay.drawCellHighlight(col, row, { label: 'PIN', padding: 0 });
     } else {
-      // Show crosshair when not on edge
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = 1;
-
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - 10);
-      ctx.lineTo(cx, cy - 4);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(cx, cy + 4);
-      ctx.lineTo(cx, cy + 10);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(cx - 10, cy);
-      ctx.lineTo(cx - 4, cy);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(cx + 4, cy);
-      ctx.lineTo(cx + 10, cy);
-      ctx.stroke();
+      overlay.drawCrosshair(col, row);
     }
 
-    // Show current shape name in status area
-    ctx.fillStyle = accent;
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`Shape: ${shape.name} (1-8 or Space to change)`, 10, 10);
+    overlay.drawStatusLabel(0, 0, `Shape: ${shape.name} (1-8 or Space to change)`,
+      { dx: 10, dy: 14 });
   }
 };

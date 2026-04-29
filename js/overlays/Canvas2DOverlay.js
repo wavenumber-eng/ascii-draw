@@ -634,4 +634,368 @@ AsciiEditor.overlays.Canvas2DOverlay = class Canvas2DOverlay extends AsciiEditor
     this.ctx.lineTo(x, y + dims.height);
     this.ctx.stroke();
   }
+
+  // ============================================================
+  // Cell-coordinate primitives (new tool-overlay API)
+  // Tools should call these instead of touching ctx directly.
+  // ============================================================
+
+  _accent() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#007acc';
+  }
+  _accentSecondary() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--accent-secondary').trim() || '#00aa66';
+  }
+  _bgCanvas() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
+  }
+  _textCanvas() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--text-canvas').trim() || '#cccccc';
+  }
+  _cellCenter(col, row) {
+    const d = this.viewport.getCellDimensions();
+    return { x: col * d.width + d.width / 2, y: row * d.height + d.height / 2 };
+  }
+  _cellOrigin(col, row) {
+    const d = this.viewport.getCellDimensions();
+    return { x: col * d.width, y: row * d.height };
+  }
+
+  /** Crosshair at cell center. opts: { color, size }. */
+  drawCrosshair(col, row, opts = {}) {
+    if (!this.ctx) return;
+    const { x, y } = this._cellCenter(col, row);
+    const size = opts.size || 8;
+    this.ctx.strokeStyle = opts.color || this._accent();
+    this.ctx.lineWidth = 1;
+    this.ctx.setLineDash([]);
+    this.ctx.beginPath();
+    this.ctx.moveTo(x, y - size); this.ctx.lineTo(x, y + size);
+    this.ctx.moveTo(x - size, y); this.ctx.lineTo(x + size, y);
+    this.ctx.stroke();
+  }
+
+  /** ASCII glyph at one cell. opts: { color, font, bgColor }. */
+  drawCellGlyph(col, row, char, opts = {}) {
+    if (!this.ctx) return;
+    const d = this.viewport.getCellDimensions();
+    const { x: ox, y: oy } = this._cellOrigin(col, row);
+    if (opts.bgColor) {
+      this.ctx.fillStyle = opts.bgColor;
+      this.ctx.fillRect(ox, oy, d.width, d.height);
+    }
+    this.ctx.fillStyle = opts.color || this._textCanvas();
+    this.ctx.font = opts.font || '16px BerkeleyMono, monospace';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(char, ox + d.width / 2, oy + d.height / 2);
+  }
+
+  /** Rect spanning a cell range (col,row,w,h in cells).
+   *  opts: { strokeColor, fillColor, dash, lineWidth, sizeLabel } */
+  drawCellRect(col, row, w, h, opts = {}) {
+    if (!this.ctx) return;
+    const d = this.viewport.getCellDimensions();
+    const x = col * d.width;
+    const y = row * d.height;
+    const px = w * d.width;
+    const py = h * d.height;
+    if (opts.fillColor) {
+      this.ctx.fillStyle = opts.fillColor;
+      this.ctx.fillRect(x, y, px, py);
+    }
+    this.ctx.strokeStyle = opts.strokeColor || this._accent();
+    this.ctx.lineWidth = opts.lineWidth || 1;
+    this.ctx.setLineDash(opts.dash || []);
+    this.ctx.strokeRect(x, y, px, py);
+    this.ctx.setLineDash([]);
+    if (opts.sizeLabel) {
+      this.ctx.font = '11px sans-serif';
+      this.ctx.fillStyle = opts.strokeColor || this._accent();
+      this.ctx.textBaseline = 'alphabetic';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(opts.sizeLabel, x + 4, y - 4);
+    }
+  }
+
+  /** Highlight a single cell with optional corner markers + label.
+   *  opts: { strokeColor, fillColor, label, labelColor, cornerMarkers, padding, lineWidth } */
+  drawCellHighlight(col, row, opts = {}) {
+    if (!this.ctx) return;
+    const d = this.viewport.getCellDimensions();
+    const { x, y } = this._cellOrigin(col, row);
+    const pad = opts.padding ?? 2;
+    const w = d.width + pad * 2;
+    const h = d.height + pad * 2;
+    if (opts.fillColor) {
+      this.ctx.fillStyle = opts.fillColor;
+      this.ctx.fillRect(x - pad, y - pad, w, h);
+    }
+    this.ctx.strokeStyle = opts.strokeColor || this._accent();
+    this.ctx.lineWidth = opts.lineWidth || 2;
+    this.ctx.setLineDash([]);
+    this.ctx.strokeRect(x - pad, y - pad, w, h);
+    if (opts.cornerMarkers) {
+      const m = 4;
+      this.ctx.fillStyle = opts.strokeColor || this._accent();
+      this.ctx.fillRect(x - pad,         y - pad,         m, m);
+      this.ctx.fillRect(x + w - pad - m, y - pad,         m, m);
+      this.ctx.fillRect(x - pad,         y + h - pad - m, m, m);
+      this.ctx.fillRect(x + w - pad - m, y + h - pad - m, m, m);
+    }
+    if (opts.label) {
+      this.ctx.font = '10px sans-serif';
+      this.ctx.fillStyle = opts.labelColor || opts.strokeColor || this._accent();
+      this.ctx.textBaseline = 'alphabetic';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(opts.label, x + d.width / 2, y - pad - 4);
+    }
+  }
+
+  /** Small filled circle at a cell center. opts: { color, radius }. */
+  drawDot(col, row, opts = {}) {
+    if (!this.ctx) return;
+    const { x, y } = this._cellCenter(col, row);
+    this.ctx.fillStyle = opts.color || this._accent();
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, opts.radius || 3, 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+
+  /** Glowing connection ring (CONNECT/JOIN/EXTEND/BIND/CREATE PIN style).
+   *  opts: { color, glowColor, label, radius, withCenterDot } */
+  drawConnectionRing(col, row, opts = {}) {
+    if (!this.ctx) return;
+    const { x, y } = this._cellCenter(col, row);
+    const r = opts.radius || 8;
+    const color = opts.color || this._accentSecondary();
+    this.ctx.setLineDash([]);
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, r, 0, Math.PI * 2);
+    this.ctx.stroke();
+    this.ctx.strokeStyle = opts.glowColor || (color + '66'); // semi-transparent glow
+    this.ctx.lineWidth = 5;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+    this.ctx.stroke();
+    if (opts.label) {
+      this.ctx.font = '10px sans-serif';
+      this.ctx.fillStyle = color;
+      this.ctx.textBaseline = 'alphabetic';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(opts.label, x + r + 4, y - r);
+    }
+    if (opts.withCenterDot) {
+      this.ctx.fillStyle = this._bgCanvas();
+      this.ctx.beginPath();
+      this.ctx.arc(x, y, 6, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.strokeStyle = color;
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.arc(x, y, 5, 0, Math.PI * 2);
+      this.ctx.stroke();
+    }
+  }
+
+  /** Status label near a cell. opts: { color, font, dx, dy }. dx/dy in pixels. */
+  drawStatusLabel(col, row, text, opts = {}) {
+    if (!this.ctx) return;
+    const { x, y } = this._cellCenter(col, row);
+    this.ctx.font = opts.font || '11px sans-serif';
+    this.ctx.fillStyle = opts.color || this._accent();
+    this.ctx.textBaseline = 'alphabetic';
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText(text, x + (opts.dx ?? 8), y + (opts.dy ?? -8));
+  }
+
+  /** Red error X mark in a cell. opts: { color, label }. */
+  drawErrorMark(col, row, label, opts = {}) {
+    if (!this.ctx) return;
+    const d = this.viewport.getCellDimensions();
+    const { x: ox, y: oy } = this._cellOrigin(col, row);
+    const cx = ox + d.width / 2;
+    const cy = oy + d.height / 2;
+    const size = Math.min(d.width, d.height) * 0.6;
+    const color = opts.color || '#ff4444';
+    const fill = color + '4d';
+    this.ctx.fillStyle = fill;
+    this.ctx.fillRect(ox - 2, oy - 2, d.width + 4, d.height + 4);
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 2;
+    this.ctx.setLineDash([]);
+    this.ctx.strokeRect(ox - 2, oy - 2, d.width + 4, d.height + 4);
+    this.ctx.beginPath();
+    this.ctx.moveTo(cx - size / 2, cy - size / 2);
+    this.ctx.lineTo(cx + size / 2, cy + size / 2);
+    this.ctx.moveTo(cx + size / 2, cy - size / 2);
+    this.ctx.lineTo(cx - size / 2, cy + size / 2);
+    this.ctx.stroke();
+    if (label) {
+      this.ctx.font = '10px sans-serif';
+      this.ctx.fillStyle = color;
+      this.ctx.textBaseline = 'alphabetic';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(label, cx, oy - 6);
+    }
+  }
+
+  /** Dashed leader line between two cells with optional dot at start.
+   *  opts: { color, dash, withStartDot } */
+  drawLeaderLine(col1, row1, col2, row2, opts = {}) {
+    if (!this.ctx) return;
+    const a = this._cellCenter(col1, row1);
+    const b = this._cellCenter(col2, row2);
+    const color = opts.color || this._accent();
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 1;
+    this.ctx.setLineDash(opts.dash || [4, 4]);
+    this.ctx.beginPath();
+    this.ctx.moveTo(a.x, a.y);
+    this.ctx.lineTo(b.x, b.y);
+    this.ctx.stroke();
+    this.ctx.setLineDash([]);
+    if (opts.withStartDot) {
+      this.ctx.fillStyle = color;
+      this.ctx.beginPath();
+      this.ctx.arc(a.x, a.y, 3, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+  }
+
+  /** Selection rectangle around an arbitrary cell-bounds rect.
+   *  bounds: { x, y, width, height } in cells. opts: { color, dash, padding, lineWidth }. */
+  drawSelectionRect(bounds, opts = {}) {
+    if (!this.ctx) return;
+    const d = this.viewport.getCellDimensions();
+    const px = bounds.x * d.width;
+    const py = bounds.y * d.height;
+    const w = bounds.width * d.width;
+    const h = bounds.height * d.height;
+    const pad = opts.padding ?? 4;
+    this.ctx.strokeStyle = opts.color || this._accent();
+    this.ctx.lineWidth = opts.lineWidth || 1;
+    this.ctx.setLineDash(opts.dash || [4, 3]);
+    this.ctx.strokeRect(px - pad, py - pad, w + pad * 2, h + pad * 2);
+    this.ctx.setLineDash([]);
+  }
+
+  /** Resize handles at the four corners of a cell-bounds rect. */
+  drawCornerHandles(bounds, opts = {}) {
+    if (!this.ctx) return;
+    const d = this.viewport.getCellDimensions();
+    const px = bounds.x * d.width;
+    const py = bounds.y * d.height;
+    const w = bounds.width * d.width;
+    const h = bounds.height * d.height;
+    const sz = opts.size || 6;
+    this.ctx.fillStyle = opts.color || this._accent();
+    this.ctx.setLineDash([]);
+    this.ctx.fillRect(px - sz / 2,         py - sz / 2,         sz, sz);
+    this.ctx.fillRect(px + w - sz / 2,     py - sz / 2,         sz, sz);
+    this.ctx.fillRect(px - sz / 2,         py + h - sz / 2,     sz, sz);
+    this.ctx.fillRect(px + w - sz / 2,     py + h - sz / 2,     sz, sz);
+  }
+
+  /** Vertex handle (square + 4 diagonal arrows). col,row may be fractional. */
+  drawVertexHandleDecorated(col, row, opts = {}) {
+    if (!this.ctx) return;
+    const d = this.viewport.getCellDimensions();
+    const cx = col * d.width + d.width / 2;
+    const cy = row * d.height + d.height / 2;
+    const handleSize = opts.size || 6;
+    const color = opts.color || this._accent();
+    this.ctx.fillStyle = color;
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 1.5;
+    this.ctx.setLineDash([]);
+    this.ctx.fillRect(cx - handleSize / 2, cy - handleSize / 2, handleSize, handleSize);
+    const o = 7, a = 3;
+    const dirs = [[+1, -1], [+1, +1], [-1, +1], [-1, -1]];
+    dirs.forEach(([dx, dy]) => {
+      this.ctx.beginPath();
+      this.ctx.moveTo(cx + dx * o, cy + dy * o);
+      this.ctx.lineTo(cx + dx * o - dx * a, cy + dy * o);
+      this.ctx.moveTo(cx + dx * o, cy + dy * o);
+      this.ctx.lineTo(cx + dx * o, cy + dy * o - dy * a);
+      this.ctx.stroke();
+    });
+  }
+
+  /** Segment handle (square + 2 axis arrows). orientation: 'h' or 'v'. col,row may be fractional. */
+  drawSegmentHandleDecorated(col, row, orientation, opts = {}) {
+    if (!this.ctx) return;
+    const d = this.viewport.getCellDimensions();
+    const cx = col * d.width + d.width / 2;
+    const cy = row * d.height + d.height / 2;
+    const sz = opts.size || 4;
+    const color = opts.color || this._accentSecondary();
+    this.ctx.fillStyle = color;
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 1;
+    this.ctx.setLineDash([]);
+    this.ctx.fillRect(cx - sz / 2, cy - sz / 2, sz, sz);
+    const o = 8, a = 3;
+    if (orientation === 'h') {
+      [-1, +1].forEach(dy => {
+        this.ctx.beginPath();
+        this.ctx.moveTo(cx, cy + dy * o);
+        this.ctx.lineTo(cx - a, cy + dy * o - dy * a);
+        this.ctx.moveTo(cx, cy + dy * o);
+        this.ctx.lineTo(cx + a, cy + dy * o - dy * a);
+        this.ctx.stroke();
+      });
+    } else {
+      [-1, +1].forEach(dx => {
+        this.ctx.beginPath();
+        this.ctx.moveTo(cx + dx * o, cy);
+        this.ctx.lineTo(cx + dx * o - dx * a, cy - a);
+        this.ctx.moveTo(cx + dx * o, cy);
+        this.ctx.lineTo(cx + dx * o - dx * a, cy + a);
+        this.ctx.stroke();
+      });
+    }
+  }
+
+  /** Render an ASCII path through `points` using a chars set { h, v, tl, tr, bl, br }.
+   *  Handles corner inference. opts: { color, font }. */
+  drawAsciiPath(points, chars, opts = {}) {
+    if (!this.ctx || !points || points.length < 2) return;
+    const d = this.viewport.getCellDimensions();
+    this.ctx.font = opts.font || '16px BerkeleyMono, monospace';
+    this.ctx.fillStyle = opts.color || this._textCanvas();
+    this.ctx.textBaseline = 'middle';
+    this.ctx.textAlign = 'center';
+    const cellChar = (col, row, ch) => {
+      this.ctx.fillText(ch, col * d.width + d.width / 2, row * d.height + d.height / 2);
+    };
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      if (a.x === b.x) {
+        const lo = Math.min(a.y, b.y), hi = Math.max(a.y, b.y);
+        for (let y = lo; y <= hi; y++) cellChar(a.x, y, chars.v);
+      } else if (a.y === b.y) {
+        const lo = Math.min(a.x, b.x), hi = Math.max(a.x, b.x);
+        for (let x = lo; x <= hi; x++) cellChar(x, a.y, chars.h);
+      }
+    }
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1], curr = points[i], next = points[i + 1];
+      const fromH = (prev.y === curr.y);
+      const toH = (curr.y === next.y);
+      if (fromH === toH) continue;
+      const goingRight = fromH ? (curr.x > prev.x) : (next.x > curr.x);
+      const goingDown = fromH ? (next.y > curr.y) : (curr.y > prev.y);
+      let ch;
+      if (fromH) {
+        ch = goingRight ? (goingDown ? chars.tr : chars.br) : (goingDown ? chars.tl : chars.bl);
+      } else {
+        ch = goingDown ? (goingRight ? chars.tl : chars.tr) : (goingRight ? chars.bl : chars.br);
+      }
+      cellChar(curr.x, curr.y, ch);
+    }
+  }
 };

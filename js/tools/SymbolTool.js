@@ -19,7 +19,7 @@ AsciiEditor.tools.SymbolTool = class SymbolTool extends AsciiEditor.tools.Tool {
   activate(context) {
     this.drawing = false;
     this.currentPos = null;
-    context.canvas.style.cursor = this.cursor;
+    context.setCursor(this.cursor);
   }
 
   deactivate() {
@@ -149,56 +149,20 @@ AsciiEditor.tools.SymbolTool = class SymbolTool extends AsciiEditor.tools.Tool {
     return false;
   }
 
-  renderOverlay(ctx, context) {
-    const styles = getComputedStyle(document.documentElement);
-    const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
-    const grid = context.grid;
-    const offsetX = grid.charWidth / 2;
-    const offsetY = grid.charHeight / 2;
-
-    // Draw crosshair cursor when hovering (not drawing)
+  renderOverlay(overlay, context) {
     if (!this.drawing && this.currentPos) {
-      const pixel = grid.charToPixel(this.currentPos.col, this.currentPos.row);
-      const cx = pixel.x + offsetX;
-      const cy = pixel.y + offsetY;
-
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = 1;
-
-      // Vertical line
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - 8);
-      ctx.lineTo(cx, cy + 8);
-      ctx.stroke();
-
-      // Horizontal line
-      ctx.beginPath();
-      ctx.moveTo(cx - 8, cy);
-      ctx.lineTo(cx + 8, cy);
-      ctx.stroke();
+      overlay.drawCrosshair(this.currentPos.col, this.currentPos.row);
     }
 
-    // Draw drag rectangle when drawing
     if (this.drawing && this.startPos && this.currentPos) {
       const x = Math.min(this.startPos.col, this.currentPos.col);
       const y = Math.min(this.startPos.row, this.currentPos.row);
-      const width = Math.abs(this.currentPos.col - this.startPos.col) + 1;
-      const height = Math.abs(this.currentPos.row - this.startPos.row) + 1;
-
-      const pixelPos = grid.charToPixel(x, y);
-      const pixelWidth = width * grid.charWidth;
-      const pixelHeight = height * grid.charHeight;
-
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([5, 3]);
-      ctx.strokeRect(pixelPos.x, pixelPos.y, pixelWidth, pixelHeight);
-      ctx.setLineDash([]);
-
-      // Size indicator with "S" prefix to distinguish from box
-      ctx.fillStyle = accent;
-      ctx.font = '11px sans-serif';
-      ctx.fillText(`S ${width}x${height}`, pixelPos.x + 4, pixelPos.y - 4);
+      const w = Math.abs(this.currentPos.col - this.startPos.col) + 1;
+      const h = Math.abs(this.currentPos.row - this.startPos.row) + 1;
+      overlay.drawCellRect(x, y, w, h, {
+        dash: [5, 3],
+        sizeLabel: `S ${w}x${h}`
+      });
     }
   }
 };

@@ -83,9 +83,9 @@ AsciiEditor.tools.ToolManager = class ToolManager {
     return false;
   }
 
-  renderOverlay(ctx) {
+  renderOverlay(overlay) {
     if (this.activeTool && this.context) {
-      this.activeTool.renderOverlay(ctx, this.context);
+      this.activeTool.renderOverlay(overlay, this.context);
     }
   }
 };

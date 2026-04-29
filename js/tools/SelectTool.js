@@ -73,7 +73,7 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
   activate(context) {
     this.resetState();
-    context.canvas.style.cursor = this.cursor;
+    context.setCursor(this.cursor);
   }
 
   deactivate() {
@@ -442,19 +442,18 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
       const handle = this.hitTestHandle(pixelX, pixelY, context);
       if (handle) {
         if (handle.type === 'line_point') {
-          context.canvas.style.cursor = 'move';
+          context.setCursor('move');
         } else if (handle.type === 'line_segment') {
-          // Show appropriate cursor based on segment direction
-          context.canvas.style.cursor = handle.isHorizontal ? 'ns-resize' : 'ew-resize';
+          context.setCursor(handle.isHorizontal ? 'ns-resize' : 'ew-resize');
         } else {
-          context.canvas.style.cursor = this.getHandleCursor(handle.position);
+          context.setCursor(this.getHandleCursor(handle.position));
         }
         return false;
       }
     }
 
     const hit = this.hitTestObject(col, row, context);
-    context.canvas.style.cursor = hit ? 'move' : 'default';
+    context.setCursor(hit ? 'move' : 'default');
 
     return false;
   }
@@ -1596,48 +1595,39 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
 
     const handleSize = 8;
 
+    const dims = context.viewport.getCellDimensions();
+    const cw = dims.width, ch = dims.height;
+
     // Line/Wire handles (vertex and segment)
     if ((obj.type === 'line' || obj.type === 'wire') && obj.points) {
-      // First check vertex handles (higher priority)
       for (let i = 0; i < obj.points.length; i++) {
         const point = obj.points[i];
-        const pixel = context.grid.charToPixel(point.x, point.y);
-        const centerX = pixel.x + context.grid.charWidth / 2;
-        const centerY = pixel.y + context.grid.charHeight / 2;
-
+        const centerX = point.x * cw + cw / 2;
+        const centerY = point.y * ch + ch / 2;
         if (Math.abs(pixelX - centerX) <= handleSize && Math.abs(pixelY - centerY) <= handleSize) {
           return { type: 'line_point', pointIndex: i, obj };
         }
       }
-
-      // Then check segment handles (midpoints)
       for (let i = 0; i < obj.points.length - 1; i++) {
         const p1 = obj.points[i];
         const p2 = obj.points[i + 1];
-
-        // Calculate midpoint in character coordinates
         const midX = (p1.x + p2.x) / 2;
         const midY = (p1.y + p2.y) / 2;
-
-        // Convert to pixel coordinates
-        const midPixelX = midX * context.grid.charWidth + context.grid.charWidth / 2;
-        const midPixelY = midY * context.grid.charHeight + context.grid.charHeight / 2;
-
-        // Determine if segment is horizontal or vertical
+        const midPixelX = midX * cw + cw / 2;
+        const midPixelY = midY * ch + ch / 2;
         const isHorizontal = (p1.y === p2.y);
-
         if (Math.abs(pixelX - midPixelX) <= handleSize && Math.abs(pixelY - midPixelY) <= handleSize) {
           return { type: 'line_segment', segmentIndex: i, isHorizontal, obj };
         }
       }
-
       return null;
     }
 
     // Box corner handles
-    const { x, y } = context.grid.charToPixel(obj.x, obj.y);
-    const width = (obj.width || 10) * context.grid.charWidth;
-    const height = (obj.height || 3) * context.grid.charHeight;
+    const x = obj.x * cw;
+    const y = obj.y * ch;
+    const width = (obj.width || 10) * cw;
+    const height = (obj.height || 3) * ch;
 
     const handles = [
       { position: HandlePosition.TOP_LEFT, hx: x, hy: y },
@@ -2273,220 +2263,114 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
   }
 
   // SEL-3: Visual distinction for marquee modes
-  renderOverlay(ctx, context) {
+  renderOverlay(overlay, context) {
     const state = context.history.getState();
     const page = state.project.pages.find(p => p.id === state.activePageId);
     if (!page) return;
 
-    // Get CSS variables for colors
     const styles = getComputedStyle(document.documentElement);
-    const selectionStroke = styles.getPropertyValue('--selection-stroke').trim() || '#007acc';
-    const marqueeEnclosedStroke = styles.getPropertyValue('--marquee-enclosed-stroke').trim() || '#007acc';
-    const marqueeEnclosedFill = styles.getPropertyValue('--marquee-enclosed-fill').trim() || 'rgba(0, 122, 204, 0.1)';
-    const marqueeIntersectStroke = styles.getPropertyValue('--marquee-intersect-stroke').trim() || '#00cc7a';
-    const marqueeIntersectFill = styles.getPropertyValue('--marquee-intersect-fill').trim() || 'rgba(0, 204, 122, 0.1)';
-    const pinSelectionColor = styles.getPropertyValue('--accent-secondary').trim() || '#00aa66';
+    const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
+    const accentSecondary = styles.getPropertyValue('--accent-secondary').trim() || '#00aa66';
 
-    // Draw marquee selection rectangle
+    // Marquee
     if (this.mode === SelectMode.MARQUEE && this.dragStart && this.dragCurrent) {
-      const x1 = Math.min(this.dragStart.pixelX, this.dragCurrent.pixelX);
-      const y1 = Math.min(this.dragStart.pixelY, this.dragCurrent.pixelY);
-      const w = Math.abs(this.dragCurrent.pixelX - this.dragStart.pixelX);
-      const h = Math.abs(this.dragCurrent.pixelY - this.dragStart.pixelY);
-
-      const leftToRight = this.dragCurrent.col >= this.dragStart.col;
-
-      ctx.lineWidth = 1;
-
-      if (leftToRight) {
-        // Enclosed mode: solid line
-        ctx.setLineDash([]);
-        ctx.strokeStyle = marqueeEnclosedStroke;
-        ctx.fillStyle = marqueeEnclosedFill;
-      } else {
-        // Intersect mode: dashed line
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = marqueeIntersectStroke;
-        ctx.fillStyle = marqueeIntersectFill;
-      }
-
-      ctx.fillRect(x1, y1, w, h);
-      ctx.strokeRect(x1, y1, w, h);
-      ctx.setLineDash([]);
+      const c1 = this.dragStart.col, c2 = this.dragCurrent.col;
+      const r1 = this.dragStart.row, r2 = this.dragCurrent.row;
+      const x = Math.min(c1, c2), y = Math.min(r1, r2);
+      const w = Math.abs(c2 - c1), h = Math.abs(r2 - r1);
+      const enclosed = c2 >= c1;
+      const stroke = enclosed
+        ? (styles.getPropertyValue('--marquee-enclosed-stroke').trim() || '#007acc')
+        : (styles.getPropertyValue('--marquee-intersect-stroke').trim() || '#00cc7a');
+      const fill = enclosed
+        ? (styles.getPropertyValue('--marquee-enclosed-fill').trim() || 'rgba(0, 122, 204, 0.1)')
+        : (styles.getPropertyValue('--marquee-intersect-fill').trim() || 'rgba(0, 204, 122, 0.1)');
+      overlay.drawCellRect(x, y, w, h, {
+        strokeColor: stroke,
+        fillColor: fill,
+        dash: enclosed ? [] : [4, 4]
+      });
     }
 
-    // Draw vertex drag indicator (bind pin / create pin)
+    // Vertex drag indicator (bind / create pin)
     if (this.mode === SelectMode.LINE_POINT && this.vertexDragIndicator) {
-      const indicator = this.vertexDragIndicator;
-      const pixel = context.grid.charToPixel(indicator.pos.x, indicator.pos.y);
-      const centerX = pixel.x + context.grid.charWidth / 2;
-      const centerY = pixel.y + context.grid.charHeight / 2;
-
-      // Draw indicator circle/box
-      ctx.lineWidth = 2;
-      if (indicator.type === 'bind') {
-        // Bind to existing pin - green indicator
-        ctx.strokeStyle = '#00cc66';
-        ctx.fillStyle = 'rgba(0, 204, 102, 0.3)';
-      } else {
-        // Create new pin - blue indicator
-        ctx.strokeStyle = '#007acc';
-        ctx.fillStyle = 'rgba(0, 122, 204, 0.3)';
-      }
-
-      // Draw highlight around the cell
-      ctx.fillRect(pixel.x - 2, pixel.y - 2, context.grid.charWidth + 4, context.grid.charHeight + 4);
-      ctx.strokeRect(pixel.x - 2, pixel.y - 2, context.grid.charWidth + 4, context.grid.charHeight + 4);
-
-      // Draw label
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = indicator.type === 'bind' ? '#00cc66' : '#007acc';
-      const label = indicator.type === 'bind' ? 'BIND PIN' : 'CREATE PIN';
-      const labelWidth = ctx.measureText(label).width;
-      ctx.fillText(label, centerX - labelWidth / 2, pixel.y - 6);
+      const ind = this.vertexDragIndicator;
+      const isBind = ind.type === 'bind';
+      overlay.drawCellHighlight(ind.pos.x, ind.pos.y, {
+        strokeColor: isBind ? '#00cc66' : '#007acc',
+        fillColor:  isBind ? 'rgba(0, 204, 102, 0.3)' : 'rgba(0, 122, 204, 0.3)',
+        label: isBind ? 'BIND PIN' : 'CREATE PIN'
+      });
     }
 
-    // Draw segment drag collision error indicator
+    // Segment drag pin-collision error
     if (this.mode === SelectMode.LINE_SEGMENT && this.segmentDragPinCollision && this.segmentDragPinInfo) {
-      const pinInfo = this.segmentDragPinInfo;
-      const pixel = context.grid.charToPixel(pinInfo.newPos.x, pinInfo.newPos.y);
-
-      // Red error indicator
-      ctx.strokeStyle = '#ff4444';
-      ctx.fillStyle = 'rgba(255, 68, 68, 0.3)';
-      ctx.lineWidth = 2;
-
-      // Draw X mark
-      const size = Math.min(context.grid.charWidth, context.grid.charHeight) * 0.6;
-      const centerX = pixel.x + context.grid.charWidth / 2;
-      const centerY = pixel.y + context.grid.charHeight / 2;
-
-      ctx.fillRect(pixel.x - 2, pixel.y - 2, context.grid.charWidth + 4, context.grid.charHeight + 4);
-      ctx.strokeRect(pixel.x - 2, pixel.y - 2, context.grid.charWidth + 4, context.grid.charHeight + 4);
-
-      // Draw X
-      ctx.beginPath();
-      ctx.moveTo(centerX - size / 2, centerY - size / 2);
-      ctx.lineTo(centerX + size / 2, centerY + size / 2);
-      ctx.moveTo(centerX + size / 2, centerY - size / 2);
-      ctx.lineTo(centerX - size / 2, centerY + size / 2);
-      ctx.stroke();
-
-      // Draw error label
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = '#ff4444';
-      const label = 'PIN COLLISION';
-      const labelWidth = ctx.measureText(label).width;
-      ctx.fillText(label, centerX - labelWidth / 2, pixel.y - 6);
+      const p = this.segmentDragPinInfo.newPos;
+      overlay.drawErrorMark(p.x, p.y, 'PIN COLLISION');
     }
 
-    // Get selection styling from CSS variables
+    // Selection rectangles + handles per selected object
     const selectionPadding = parseInt(styles.getPropertyValue('--selection-padding').trim()) || 4;
     const selectionDashStr = styles.getPropertyValue('--selection-dash').trim() || '4, 3';
     const selectionDash = selectionDashStr.split(',').map(s => parseInt(s.trim()));
     const selectionLineWidth = parseFloat(styles.getPropertyValue('--selection-line-width').trim()) || 1;
-
-    // Per-object-type stroke colors
     const selectionStrokes = {
-      box: styles.getPropertyValue('--selection-box-stroke').trim() || 'rgba(0, 122, 204, 0.5)',
-      symbol: styles.getPropertyValue('--selection-symbol-stroke').trim() || 'rgba(204, 122, 0, 0.5)',
-      line: styles.getPropertyValue('--selection-line-stroke').trim() || 'rgba(0, 122, 204, 0.5)',
-      text: styles.getPropertyValue('--selection-text-stroke').trim() || 'rgba(0, 122, 204, 0.5)',
+      box:     styles.getPropertyValue('--selection-box-stroke').trim()     || 'rgba(0, 122, 204, 0.5)',
+      symbol:  styles.getPropertyValue('--selection-symbol-stroke').trim()  || 'rgba(204, 122, 0, 0.5)',
+      line:    styles.getPropertyValue('--selection-line-stroke').trim()    || 'rgba(0, 122, 204, 0.5)',
+      text:    styles.getPropertyValue('--selection-text-stroke').trim()    || 'rgba(0, 122, 204, 0.5)',
       default: styles.getPropertyValue('--selection-default-stroke').trim() || 'rgba(0, 122, 204, 0.5)'
     };
-
-    // Draw selection rectangles for each selected object
     const isSingleSelection = state.selection.ids.length === 1;
 
     state.selection.ids.forEach(id => {
       const obj = page.objects.find(o => o.id === id);
-      if (obj) {
-        // Use getObjectBounds to handle both boxes and lines
-        const bounds = this.getObjectBounds(obj);
-        const { x, y } = context.grid.charToPixel(bounds.x, bounds.y);
-        const width = bounds.width * context.grid.charWidth;
-        const height = bounds.height * context.grid.charHeight;
-
-        // Get stroke color for this object type
-        const strokeColor = selectionStrokes[obj.type] || selectionStrokes.default;
-
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = selectionLineWidth;
-        ctx.setLineDash(selectionDash);
-        ctx.strokeRect(
-          x - selectionPadding,
-          y - selectionPadding,
-          width + selectionPadding * 2,
-          height + selectionPadding * 2
-        );
-        ctx.setLineDash([]);
-
-        // SEL-22: Draw resize handles only for single selection
-        if (isSingleSelection) {
-          const handleSize = 6;
-          ctx.fillStyle = selectionStroke;
-
-          if (obj.type === 'line' || obj.type === 'wire') {
-            // For lines/wires, draw handles at each point
-            this.drawLineHandles(ctx, obj, context);
-          } else {
-            // Corner handles for boxes
-            ctx.fillRect(x - handleSize/2, y - handleSize/2, handleSize, handleSize);
-            ctx.fillRect(x + width - handleSize/2, y - handleSize/2, handleSize, handleSize);
-            ctx.fillRect(x - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
-            ctx.fillRect(x + width - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
-          }
+      if (!obj) return;
+      const bounds = this.getObjectBounds(obj);
+      const color = selectionStrokes[obj.type] || selectionStrokes.default;
+      overlay.drawSelectionRect(bounds, {
+        color,
+        dash: selectionDash,
+        padding: selectionPadding,
+        lineWidth: selectionLineWidth
+      });
+      if (isSingleSelection) {
+        if (obj.type === 'line' || obj.type === 'wire') {
+          this.drawLineHandlesOverlay(overlay, obj);
+        } else {
+          overlay.drawCornerHandles(bounds, { color: accent });
         }
       }
     });
 
-    // Draw selected pin highlight(s)
+    // Selected pins
     const selectedPinIds = state.selection.pinIds || [];
     if (selectedPinIds.length > 0) {
-      // Get all symbols that might contain selected pins
       state.selection.ids.forEach(symbolId => {
         const symbol = page.objects.find(o => o.id === symbolId);
         if (symbol && symbol.type === 'symbol' && symbol.pins) {
           symbol.pins.forEach(pin => {
             if (selectedPinIds.includes(pin.id)) {
               const pos = this.getPinPosition(symbol, pin);
-              const pixel = context.grid.charToPixel(pos.x, pos.y);
-
-              // Draw highlight box around the selected pin
-              ctx.strokeStyle = pinSelectionColor;
-              ctx.lineWidth = 2;
-              ctx.setLineDash([]);
-              ctx.strokeRect(
-                pixel.x - 2,
-                pixel.y - 2,
-                context.grid.charWidth + 4,
-                context.grid.charHeight + 4
-              );
-
-              // Draw corner markers
-              const markerSize = 4;
-              ctx.fillStyle = pinSelectionColor;
-              ctx.fillRect(pixel.x - 2, pixel.y - 2, markerSize, markerSize);
-              ctx.fillRect(pixel.x + context.grid.charWidth + 2 - markerSize, pixel.y - 2, markerSize, markerSize);
-              ctx.fillRect(pixel.x - 2, pixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
-              ctx.fillRect(pixel.x + context.grid.charWidth + 2 - markerSize, pixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
+              overlay.drawCellHighlight(pos.x, pos.y, {
+                strokeColor: accentSecondary,
+                cornerMarkers: true
+              });
             }
           });
         }
       });
     }
 
-    // OBJ-5A7, OBJ-5A8: Draw selected label highlight and leader line
+    // Selected label (designator / parameter) with leader line
     if (state.selection.labelType && state.selection.ids.length === 1) {
       const symbol = page.objects.find(o => o.id === state.selection.ids[0]);
       if (symbol && symbol.type === 'symbol') {
         let labelOffset = null;
         let labelText = '';
-
         if (state.selection.labelType === 'designator' && symbol.designator && symbol.designator.visible) {
-          const desig = symbol.designator;
-          labelOffset = desig.offset || { x: 0, y: -1 };
-          labelText = `${desig.prefix}${desig.number}`;
+          labelOffset = symbol.designator.offset || { x: 0, y: -1 };
+          labelText = `${symbol.designator.prefix}${symbol.designator.number}`;
         } else if (state.selection.labelType === 'parameter' && symbol.parameters && state.selection.labelParamIndex !== null) {
           const param = symbol.parameters[state.selection.labelParamIndex];
           if (param && param.visible) {
@@ -2494,183 +2378,44 @@ AsciiEditor.tools.SelectTool = class SelectTool extends AsciiEditor.tools.Tool {
             labelText = param.value || '';
           }
         }
-
         if (labelOffset && labelText.length > 0) {
-          const labelX = symbol.x + labelOffset.x;
-          const labelY = symbol.y + labelOffset.y;
-          const labelPixel = context.grid.charToPixel(labelX, labelY);
-          const labelWidth = labelText.length * context.grid.charWidth;
-
-          // Draw highlight box around the selected label
-          const labelSelectionColor = styles.getPropertyValue('--accent').trim() || '#007acc';
-          ctx.strokeStyle = labelSelectionColor;
-          ctx.lineWidth = 2;
-          ctx.setLineDash([]);
-          ctx.strokeRect(
-            labelPixel.x - 2,
-            labelPixel.y - 2,
-            labelWidth + 4,
-            context.grid.charHeight + 4
+          const lx = symbol.x + labelOffset.x;
+          const ly = symbol.y + labelOffset.y;
+          // Highlight bounds spanning the label text
+          overlay.drawSelectionRect(
+            { x: lx, y: ly, width: labelText.length, height: 1 },
+            { color: accent, dash: [], padding: 2, lineWidth: 2 }
           );
-
-          // Draw corner markers
-          const markerSize = 4;
-          ctx.fillStyle = labelSelectionColor;
-          ctx.fillRect(labelPixel.x - 2, labelPixel.y - 2, markerSize, markerSize);
-          ctx.fillRect(labelPixel.x + labelWidth + 2 - markerSize, labelPixel.y - 2, markerSize, markerSize);
-          ctx.fillRect(labelPixel.x - 2, labelPixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
-          ctx.fillRect(labelPixel.x + labelWidth + 2 - markerSize, labelPixel.y + context.grid.charHeight + 2 - markerSize, markerSize, markerSize);
-
-          // OBJ-5A8: Draw dashed leader line from symbol center to label
-          const symbolCenterPixel = context.grid.charToPixel(
-            symbol.x + Math.floor(symbol.width / 2),
-            symbol.y + Math.floor(symbol.height / 2)
-          );
-          const symbolCX = symbolCenterPixel.x + context.grid.charWidth / 2;
-          const symbolCY = symbolCenterPixel.y + context.grid.charHeight / 2;
-
-          // Label anchor point (center of label)
-          const labelCX = labelPixel.x + labelWidth / 2;
-          const labelCY = labelPixel.y + context.grid.charHeight / 2;
-
-          // Draw dashed line
-          ctx.strokeStyle = labelSelectionColor;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([4, 4]);
-          ctx.beginPath();
-          ctx.moveTo(symbolCX, symbolCY);
-          ctx.lineTo(labelCX, labelCY);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // Draw small circle at symbol center
-          ctx.fillStyle = labelSelectionColor;
-          ctx.beginPath();
-          ctx.arc(symbolCX, symbolCY, 3, 0, Math.PI * 2);
-          ctx.fill();
+          // Leader line from symbol center to label center
+          const cx = symbol.x + Math.floor(symbol.width / 2);
+          const cy = symbol.y + Math.floor(symbol.height / 2);
+          const lcx = lx + labelText.length / 2;
+          overlay.drawLeaderLine(cx, cy, lcx, ly, { color: accent, withStartDot: true });
         }
       }
     }
   }
 
-  // Draw handles at each point of a line
-  drawLineHandles(ctx, obj, context) {
+  // Vertex + segment handles for a line/wire object
+  drawLineHandlesOverlay(overlay, obj) {
     if (!obj.points) return;
-
-    const handleSize = 6;
-    const segmentHandleSize = 4;
-    const arrowSize = 3;
-    const arrowOffset = 8;
-
-    // Get handle colors from CSS variables
     const styles = getComputedStyle(document.documentElement);
     const vertexColor = styles.getPropertyValue('--vertex-handle').trim() || '#007acc';
     const segmentColor = styles.getPropertyValue('--segment-handle').trim() || '#00aa66';
 
-    // Draw segment handles (midpoints) first, so vertex handles appear on top
+    // Segment midpoint handles. midX/midY may be fractional (mid of two integer points).
     for (let i = 0; i < obj.points.length - 1; i++) {
-      const p1 = obj.points[i];
-      const p2 = obj.points[i + 1];
-
-      const midX = (p1.x + p2.x) / 2;
-      const midY = (p1.y + p2.y) / 2;
-
-      const midPixelX = midX * context.grid.charWidth + context.grid.charWidth / 2;
-      const midPixelY = midY * context.grid.charHeight + context.grid.charHeight / 2;
-
-      const isHorizontal = (p1.y === p2.y);
-
-      // Draw square handle (thinner for segments)
-      ctx.fillStyle = segmentColor;
-      ctx.fillRect(midPixelX - segmentHandleSize/2, midPixelY - segmentHandleSize/2, segmentHandleSize, segmentHandleSize);
-
-      // Draw directional arrows
-      ctx.strokeStyle = segmentColor;
-      ctx.lineWidth = 1;
-
-      if (isHorizontal) {
-        // Up/down arrows for horizontal segments
-        // Up arrow
-        ctx.beginPath();
-        ctx.moveTo(midPixelX, midPixelY - arrowOffset);
-        ctx.lineTo(midPixelX - arrowSize, midPixelY - arrowOffset + arrowSize);
-        ctx.moveTo(midPixelX, midPixelY - arrowOffset);
-        ctx.lineTo(midPixelX + arrowSize, midPixelY - arrowOffset + arrowSize);
-        ctx.stroke();
-        // Down arrow
-        ctx.beginPath();
-        ctx.moveTo(midPixelX, midPixelY + arrowOffset);
-        ctx.lineTo(midPixelX - arrowSize, midPixelY + arrowOffset - arrowSize);
-        ctx.moveTo(midPixelX, midPixelY + arrowOffset);
-        ctx.lineTo(midPixelX + arrowSize, midPixelY + arrowOffset - arrowSize);
-        ctx.stroke();
-      } else {
-        // Left/right arrows for vertical segments
-        // Left arrow
-        ctx.beginPath();
-        ctx.moveTo(midPixelX - arrowOffset, midPixelY);
-        ctx.lineTo(midPixelX - arrowOffset + arrowSize, midPixelY - arrowSize);
-        ctx.moveTo(midPixelX - arrowOffset, midPixelY);
-        ctx.lineTo(midPixelX - arrowOffset + arrowSize, midPixelY + arrowSize);
-        ctx.stroke();
-        // Right arrow
-        ctx.beginPath();
-        ctx.moveTo(midPixelX + arrowOffset, midPixelY);
-        ctx.lineTo(midPixelX + arrowOffset - arrowSize, midPixelY - arrowSize);
-        ctx.moveTo(midPixelX + arrowOffset, midPixelY);
-        ctx.lineTo(midPixelX + arrowOffset - arrowSize, midPixelY + arrowSize);
-        ctx.stroke();
-      }
+      const p1 = obj.points[i], p2 = obj.points[i + 1];
+      overlay.drawSegmentHandleDecorated(
+        (p1.x + p2.x) / 2,
+        (p1.y + p2.y) / 2,
+        p1.y === p2.y ? 'h' : 'v',
+        { color: segmentColor }
+      );
     }
-
-    // Draw vertex handles (squares with 45-degree arrows)
-    ctx.fillStyle = vertexColor;
-    ctx.strokeStyle = vertexColor;
-    ctx.lineWidth = 1.5;
-
+    // Vertex handles
     obj.points.forEach(point => {
-      const pixel = context.grid.charToPixel(point.x, point.y);
-      const cx = pixel.x + context.grid.charWidth / 2;
-      const cy = pixel.y + context.grid.charHeight / 2;
-
-      // Draw square handle
-      ctx.fillRect(cx - handleSize/2, cy - handleSize/2, handleSize, handleSize);
-
-      // Draw 45-degree arrows (NE, SE, SW, NW)
-      const diagOffset = 7;
-      const diagArrow = 3;
-
-      // NE arrow
-      ctx.beginPath();
-      ctx.moveTo(cx + diagOffset, cy - diagOffset);
-      ctx.lineTo(cx + diagOffset - diagArrow, cy - diagOffset);
-      ctx.moveTo(cx + diagOffset, cy - diagOffset);
-      ctx.lineTo(cx + diagOffset, cy - diagOffset + diagArrow);
-      ctx.stroke();
-
-      // SE arrow
-      ctx.beginPath();
-      ctx.moveTo(cx + diagOffset, cy + diagOffset);
-      ctx.lineTo(cx + diagOffset - diagArrow, cy + diagOffset);
-      ctx.moveTo(cx + diagOffset, cy + diagOffset);
-      ctx.lineTo(cx + diagOffset, cy + diagOffset - diagArrow);
-      ctx.stroke();
-
-      // SW arrow
-      ctx.beginPath();
-      ctx.moveTo(cx - diagOffset, cy + diagOffset);
-      ctx.lineTo(cx - diagOffset + diagArrow, cy + diagOffset);
-      ctx.moveTo(cx - diagOffset, cy + diagOffset);
-      ctx.lineTo(cx - diagOffset, cy + diagOffset - diagArrow);
-      ctx.stroke();
-
-      // NW arrow
-      ctx.beginPath();
-      ctx.moveTo(cx - diagOffset, cy - diagOffset);
-      ctx.lineTo(cx - diagOffset + diagArrow, cy - diagOffset);
-      ctx.moveTo(cx - diagOffset, cy - diagOffset);
-      ctx.lineTo(cx - diagOffset, cy - diagOffset + diagArrow);
-      ctx.stroke();
+      overlay.drawVertexHandleDecorated(point.x, point.y, { color: vertexColor });
     });
   }
 };

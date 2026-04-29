@@ -24,9 +24,8 @@ AsciiEditor.Editor = class Editor {
     this.overlay = null;
     this.is3DMode = false;
 
-    // Legacy compatibility
+    // Legacy compatibility (grid still used by some tool overlays — TODO: remove via B1/A3)
     this.grid = null;
-    this.renderer = null;
     this.toolManager = new AsciiEditor.tools.ToolManager();
 
     // Derived state computer for junctions, no-connects, etc.
@@ -78,10 +77,6 @@ AsciiEditor.Editor = class Editor {
 
     // Set up pluggable architecture
     await this.setupViewport();
-
-    // Legacy renderer for backward compatibility
-    this.renderer = new AsciiEditor.rendering.Renderer(this.canvas, this.grid);
-    await this.renderer.loadFont();
 
     // Set up canvas size
     const state = this.history.getState();
@@ -168,15 +163,7 @@ AsciiEditor.Editor = class Editor {
 
   updateCanvasSize(page) {
     if (!page || !this.grid) return;
-    const width = page.width * this.grid.charWidth;
-    const height = page.height * this.grid.charHeight;
 
-    // Update legacy renderer
-    if (this.renderer) {
-      this.renderer.setCanvasSize(width, height);
-    }
-
-    // Update new viewport
     if (this.viewport) {
       this.viewport.setGridDimensions(page.width, page.height);
     }
@@ -192,12 +179,12 @@ AsciiEditor.Editor = class Editor {
     this.toolManager.register(new AsciiEditor.tools.SymbolTool());
     this.toolManager.register(new AsciiEditor.tools.PinTool());
 
-    // Set context - includes both legacy (canvas, grid) and new (viewport) references
+    // Tool context — viewport for coords/dimensions, history for state, plus editor callbacks.
+    // Tools must not reach for canvas, ctx, or grid directly.
     this.toolManager.setContext({
-      canvas: this.canvas,
-      grid: this.grid,
       viewport: this.viewport,
       history: this.history,
+      setCursor: (name) => { this.canvas.style.cursor = name; },
       startInlineEdit: (obj, initialChar) => this.startInlineEdit(obj, initialChar),
       startLabelEdit: (symbol, labelType, paramIndex, initialChar) => this.startLabelEdit(symbol, labelType, paramIndex, initialChar),
       startPinEdit: (symbol, pinIds, initialChar) => this.startPinEdit(symbol, pinIds, initialChar),
@@ -297,11 +284,24 @@ AsciiEditor.Editor = class Editor {
     this.panStart = null;
     this.panButton = null;
     this.panTotalMovement = 0;
-    this.spaceHeld = false;
 
-    // Keyboard events
-    document.addEventListener('keydown', (e) => this.handleKeyDown(e));
-    document.addEventListener('keyup', (e) => this.handleKeyUp(e));
+    // Keyboard routing — see ADR 0013
+    this.inputRouter = new AsciiEditor.input.InputRouter({
+      toolManager: this.toolManager,
+      hotkeyManager: this.hotkeyManager,
+      getEditingState: () => ({
+        editingObjectId: this.editingObjectId,
+        editingLabelSymbolId: this.editingLabelSymbolId,
+        editingPinSymbolId: this.editingPinSymbolId
+      }),
+      onSpaceHoldStart: () => { this.canvas.style.cursor = 'grab'; },
+      onSpaceHoldEnd:   () => { if (!this.isPanning) this.canvas.style.cursor = ''; },
+      onAfterDispatch:  (kind) => {
+        this.render();
+        if (kind === 'hotkey') this.updateUI();
+      }
+    });
+    this.inputRouter.attach(document);
 
     // Toolbar buttons
     document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
@@ -409,14 +409,17 @@ AsciiEditor.Editor = class Editor {
     editor.style.display = 'block';
     editor.style.opacity = '0';
 
+    // Type-to-edit appends; double-click selects all so the next keystroke
+    // can either continue or replace based on user intent.
+    const existing = freshObj.text || '';
     if (initialChar !== null) {
-      editor.value = initialChar;
-      this.editPreviewText = initialChar;
+      editor.value = existing + initialChar;
+      this.editPreviewText = editor.value;
       editor.focus();
       editor.setSelectionRange(editor.value.length, editor.value.length);
     } else {
-      editor.value = freshObj.text || '';
-      this.editPreviewText = freshObj.text || '';
+      editor.value = existing;
+      this.editPreviewText = existing;
       editor.focus();
       editor.select();
     }
@@ -508,8 +511,9 @@ AsciiEditor.Editor = class Editor {
     editor.style.opacity = '1';
     editor.style.lineHeight = `${this.grid.charHeight}px`;
 
+    // Type-to-edit appends; double-click selects all.
     if (initialChar !== null) {
-      editor.value = initialChar;
+      editor.value = currentValue + initialChar;
     } else {
       editor.value = currentValue;
     }
@@ -702,8 +706,9 @@ AsciiEditor.Editor = class Editor {
     editor.style.opacity = '1';
     editor.style.lineHeight = `${this.grid.charHeight}px`;
 
+    // Type-to-edit appends; double-click selects all.
     if (initialChar !== null) {
-      editor.value = initialChar;
+      editor.value = currentValue + initialChar;
     } else {
       editor.value = currentValue;
     }
@@ -2202,7 +2207,7 @@ AsciiEditor.Editor = class Editor {
 
   handleMouseDown(e) {
     // Middle mouse (button 1) or space+click always starts pan
-    if (e.button === 1 || (this.spaceHeld && e.button === 0)) {
+    if (e.button === 1 || (this.inputRouter.isSpaceHeld() && e.button === 0)) {
       e.preventDefault();
       this.startPan(e);
       return;
@@ -2280,59 +2285,7 @@ AsciiEditor.Editor = class Editor {
     }
   }
 
-  handleKeyDown(e) {
-    // Track space key for pan mode
-    if (e.code === 'Space' && !this.spaceHeld) {
-      this.spaceHeld = true;
-      this.canvas.style.cursor = 'grab';
-      e.preventDefault();
-      return;
-    }
-
-    if (this.editingObjectId && document.activeElement === this.inlineEditor) {
-      return;
-    }
-
-    // Don't handle keys when label editing is active
-    if (this.editingLabelSymbolId && document.activeElement === this.inlineEditor) {
-      return;
-    }
-
-    // Don't handle keys when pin editing is active
-    if (this.editingPinSymbolId && document.activeElement === this.inlineEditor) {
-      return;
-    }
-
-    if (document.activeElement.tagName === 'INPUT' ||
-        document.activeElement.tagName === 'TEXTAREA') {
-      return;
-    }
-
-    if (this.hotkeyManager.handleKeyDown(e)) {
-      this.render();
-      this.updateUI();
-      return;
-    }
-
-    if (this.toolManager.onKeyDown(e)) {
-      this.render();
-    }
-  }
-
-  handleKeyUp(e) {
-    // Track space key release
-    if (e.code === 'Space') {
-      this.spaceHeld = false;
-      if (!this.isPanning) {
-        this.canvas.style.cursor = '';
-      }
-      return;
-    }
-
-    if (this.toolManager.onKeyUp(e)) {
-      this.render();
-    }
-  }
+  // Keyboard routing lives in AsciiEditor.input.InputRouter (see ADR 0013).
 
   // ============================================================
   // UI UPDATES
@@ -2645,17 +2598,11 @@ AsciiEditor.Editor = class Editor {
         };
       }
 
-      // Use new pluggable architecture if available
-      if (this.viewport && this.backend) {
-        this._renderWithNewArchitecture(state, page, editContext);
-      } else {
-        // Fallback to legacy renderer
-        this.renderer.render(state, this.toolManager, editContext, this.derivedState);
-      }
+      this._renderFrame(state, page, editContext);
     });
   }
 
-  _renderWithNewArchitecture(state, page, editContext) {
+  _renderFrame(state, page, editContext) {
     if (!this.viewport || !this.backend) return;
 
     const ctx = this.viewport.getContext();
@@ -2719,23 +2666,23 @@ AsciiEditor.Editor = class Editor {
     // Restore context for overlays
     ctx.restore();
 
-    // Apply transforms again for tool overlays (they use grid.charToPixel which is untransformed)
+    // Apply transforms again for tool overlays (overlay primitives draw in cell space)
     ctx.save();
     if (is3D) {
-      // For 3D: use same scale as content
       const contentCanvas = ctx.canvas;
       const scale = contentCanvas.width / (page ? page.width * this.grid.charWidth : 1200);
       ctx.scale(scale, scale);
     } else {
-      // For 2D: apply DPR, pan, zoom
       const dpr2 = window.devicePixelRatio || 1;
       ctx.scale(dpr2, dpr2);
       ctx.translate(this.viewport.panX, this.viewport.panY);
       ctx.scale(this.viewport.zoomLevel, this.viewport.zoomLevel);
     }
 
-    // Let tools draw their overlays (legacy pattern - tools draw directly to ctx)
-    this.toolManager.renderOverlay(ctx);
+    // Tools draw via the overlay's cell-coordinate API (no ctx access)
+    this.overlay.beginFrame();
+    this.toolManager.renderOverlay(this.overlay);
+    this.overlay.endFrame();
 
     ctx.restore();
 
@@ -2974,6 +2921,12 @@ AsciiEditor.Editor = class Editor {
       reader.onload = (e) => {
         try {
           const project = JSON.parse(e.target.result);
+          // Strip any derived objects from saved file (recomputed at render)
+          if (project.pages) {
+            project.pages.forEach(p => {
+              if (p.objects) p.objects = p.objects.filter(o => !o.derived);
+            });
+          }
           this.history.updateState(s => ({
             ...s,
             project,
@@ -3034,6 +2987,13 @@ AsciiEditor.Editor = class Editor {
 
       const data = JSON.parse(saved);
       if (!data.project) return null;
+
+      // Strip any derived objects (recomputed at render)
+      if (data.project.pages) {
+        data.project.pages.forEach(p => {
+          if (p.objects) p.objects = p.objects.filter(o => !o.derived);
+        });
+      }
 
       // Reconstruct state with saved project
       const state = AsciiEditor.core.createInitialState();

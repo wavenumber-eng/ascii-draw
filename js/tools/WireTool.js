@@ -61,7 +61,7 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
 
   activate(context) {
     this.resetToolState();
-    context.canvas.style.cursor = this.cursor;
+    context.setCursor(this.cursor);
   }
 
   deactivate() {
@@ -597,226 +597,92 @@ AsciiEditor.tools.WireTool = class WireTool extends AsciiEditor.tools.Tool {
     this.resetToolState();
   }
 
-  drawLineSegments(ctx, points, chars, grid, color) {
-    const bgStyles = getComputedStyle(document.documentElement);
-    const bgCanvas = bgStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
-    this.lineUtils.drawSegments(ctx, points, chars, grid, color, bgCanvas);
-  }
 
-  renderOverlay(ctx, context) {
-    const styles = getComputedStyle(document.documentElement);
-    const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
-    const accentSecondary = styles.getPropertyValue('--accent-secondary').trim() || '#00aa66';
-    const textColor = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
-
-    const grid = context.grid;
-    const offsetX = grid.charWidth / 2;
-    const offsetY = grid.charHeight / 2;
-
-    // Get page objects for hover detection
+  renderOverlay(overlay, context) {
     const state = context.history.getState();
     const page = state.project.pages.find(p => p.id === state.activePageId);
     const objects = page ? page.objects : [];
 
-    // Detect hover targets - wire connections, floating ends, and symbol edges
-    let wireHoverTarget = null;
-    let pinHoverTarget = null;
-    let floatingEndTarget = null;
+    const cssStyles = getComputedStyle(document.documentElement);
+    const accent = cssStyles.getPropertyValue('--accent').trim() || '#007acc';
+    const accentSecondary = cssStyles.getPropertyValue('--accent-secondary').trim() || '#00aa66';
 
+    // Detect hover targets — floating end > wire > symbol edge
+    let floatingEnd = null;
+    let wireHover = null;
+    let pinHover = null;
     if (this.currentPos) {
-      // OBJ-6G: Check for floating wire end first (highest priority)
-      const floatingEnd = this.findFloatingWireEnd(this.currentPos, objects);
-      if (floatingEnd) {
-        // Don't show connect for the wire we're currently extending from
-        if (!this.extendingWire || this.extendingWire.wireId !== floatingEnd.wire.id) {
-          floatingEndTarget = { point: this.currentPos, wire: floatingEnd.wire };
-        }
+      const fe = this.findFloatingWireEnd(this.currentPos, objects);
+      if (fe && (!this.extendingWire || this.extendingWire.wireId !== fe.wire.id)) {
+        floatingEnd = { point: this.currentPos, wire: fe.wire };
       }
-
-      // Check for wire connection (mid-wire, creates junction)
-      if (!floatingEndTarget) {
-        const wireHits = this.findWiresAtPoint(this.currentPos, objects);
-        if (wireHits.length > 0) {
-          wireHoverTarget = { point: this.currentPos };
-        }
+      if (!floatingEnd && this.findWiresAtPoint(this.currentPos, objects).length > 0) {
+        wireHover = { point: this.currentPos };
       }
-
-      // Check for symbol edge (pin creation)
-      if (!floatingEndTarget && !wireHoverTarget) {
+      if (!floatingEnd && !wireHover) {
         const edgeInfo = this.findSymbolEdge(this.currentPos, objects);
         if (edgeInfo) {
-          // Check if pin already exists at this location
           const existingPin = this.findPinAtEdge(edgeInfo.symbol, edgeInfo.edge, edgeInfo.offset);
-          pinHoverTarget = {
-            point: this.currentPos,
-            hasExistingPin: !!existingPin,
-            symbol: edgeInfo.symbol
-          };
+          pinHover = { point: this.currentPos, hasExistingPin: !!existingPin };
         }
       }
     }
 
-    // OBJ-6G: Draw floating wire end indicator (CONNECT - joins wires)
-    if (floatingEndTarget) {
-      const pixel = grid.charToPixel(floatingEndTarget.point.x, floatingEndTarget.point.y);
-      const cx = pixel.x + offsetX;
-      const cy = pixel.y + offsetY;
-
-      // Green connect indicator
-      ctx.strokeStyle = accentSecondary;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.strokeStyle = 'rgba(0, 170, 102, 0.4)';
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = accentSecondary;
-      const label = this.drawing ? 'JOIN WIRE' : 'EXTEND WIRE';
-      ctx.fillText(label, cx + 12, cy - 8);
+    if (floatingEnd) {
+      overlay.drawConnectionRing(floatingEnd.point.x, floatingEnd.point.y, {
+        color: accentSecondary,
+        label: this.drawing ? 'JOIN WIRE' : 'EXTEND WIRE'
+      });
+    }
+    if (wireHover) {
+      overlay.drawConnectionRing(wireHover.point.x, wireHover.point.y, {
+        color: accentSecondary,
+        label: 'CONNECT'
+      });
+    }
+    if (pinHover && !wireHover) {
+      const color = pinHover.hasExistingPin ? accent : accentSecondary;
+      overlay.drawConnectionRing(pinHover.point.x, pinHover.point.y, {
+        color,
+        label: pinHover.hasExistingPin ? 'BIND PIN' : 'CREATE PIN'
+      });
     }
 
-    // Draw wire connection indicator (mid-wire, creates junction)
-    if (wireHoverTarget) {
-      const pixel = grid.charToPixel(wireHoverTarget.point.x, wireHoverTarget.point.y);
-      const cx = pixel.x + offsetX;
-      const cy = pixel.y + offsetY;
-
-      ctx.strokeStyle = accentSecondary;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.strokeStyle = 'rgba(0, 170, 102, 0.4)';
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = accentSecondary;
-      ctx.fillText('CONNECT', cx + 12, cy - 8);
-    }
-
-    // Draw pin creation/connection indicator on symbol edge
-    if (pinHoverTarget && !wireHoverTarget) {
-      const pixel = grid.charToPixel(pinHoverTarget.point.x, pinHoverTarget.point.y);
-      const cx = pixel.x + offsetX;
-      const cy = pixel.y + offsetY;
-
-      // Use different style for existing pin vs new pin
-      const pinColor = pinHoverTarget.hasExistingPin ? accent : accentSecondary;
-      const label = pinHoverTarget.hasExistingPin ? 'BIND PIN' : 'CREATE PIN';
-
-      // Glowing ring
-      ctx.strokeStyle = pinColor;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Outer glow
-      ctx.strokeStyle = pinHoverTarget.hasExistingPin ? 'rgba(0, 122, 204, 0.4)' : 'rgba(0, 170, 102, 0.4)';
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Label
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = pinColor;
-      ctx.fillText(label, cx + 12, cy - 8);
-    }
-
-    // Draw crosshair cursor when not drawing (skip if hovering over pin, wire, or floating end)
-    if (!this.drawing && this.currentPos && !pinHoverTarget && !wireHoverTarget && !floatingEndTarget) {
-      const pixel = grid.charToPixel(this.currentPos.x, this.currentPos.y);
-      const cx = pixel.x + offsetX;
-      const cy = pixel.y + offsetY;
-
-      ctx.strokeStyle = accentSecondary;  // Green for wires
-      ctx.lineWidth = 1;
-
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - 8);
-      ctx.lineTo(cx, cy + 8);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(cx - 8, cy);
-      ctx.lineTo(cx + 8, cy);
-      ctx.stroke();
+    if (!this.drawing && this.currentPos && !pinHover && !wireHover && !floatingEnd) {
+      overlay.drawCrosshair(this.currentPos.x, this.currentPos.y, { color: accentSecondary });
     }
 
     if (this.points.length === 0 && !this.currentPos) return;
 
-    ctx.font = '16px BerkeleyMono, monospace';
-    ctx.textBaseline = 'top';
-
-    const chars = this.currentStyle.chars;
-
-    // Build complete preview path
-    let allPoints = [...this.points];
+    // Build full preview path
+    const allPoints = [...this.points];
     if (this.drawing && this.currentPos && this.points.length > 0) {
       const anchor = this.points[this.points.length - 1];
       const previewPath = this.getPreviewPath(anchor, this.currentPos);
-      for (let i = 1; i < previewPath.length; i++) {
-        allPoints.push(previewPath[i]);
-      }
+      for (let i = 1; i < previewPath.length; i++) allPoints.push(previewPath[i]);
     }
-
-    // Draw ASCII characters for the path
     if (allPoints.length >= 2) {
-      this.drawLineSegments(ctx, allPoints, chars, grid, textColor);
+      overlay.drawAsciiPath(allPoints, this.currentStyle.chars);
     }
 
-    // Draw point markers
-    ctx.fillStyle = accentSecondary;
-    for (let i = 0; i < this.points.length; i++) {
-      const pixel = grid.charToPixel(this.points[i].x, this.points[i].y);
-      ctx.beginPath();
-      ctx.arc(pixel.x + offsetX, pixel.y + offsetY, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    for (const p of this.points) overlay.drawDot(p.x, p.y, { color: accentSecondary });
 
-    // Status indicator
     if (this.points.length > 0) {
-      ctx.font = '11px sans-serif';
-      ctx.fillStyle = accentSecondary;
-      const lastPoint = this.points[this.points.length - 1];
-      const labelPixel = grid.charToPixel(lastPoint.x, lastPoint.y);
-      const postureLabel = this.hFirst ? 'H-V' : 'V-H';
+      const last = this.points[this.points.length - 1];
+      const posture = this.hFirst ? 'H-V' : 'V-H';
       const styleInfo = `${this.currentStyle.hotkey}:${this.currentStyle.label}`;
       const netInfo = this.netName ? ` net:${this.netName}` : '';
-      ctx.fillText(`${this.points.length}pts ${postureLabel} [${styleInfo}]${netInfo}`, labelPixel.x + offsetX + 8, labelPixel.y + offsetY - 8);
+      overlay.drawStatusLabel(last.x, last.y,
+        `${this.points.length}pts ${posture} [${styleInfo}]${netInfo}`,
+        { color: accentSecondary });
     }
 
-    // Draw pin indicator on top of everything (so it's visible over wire path)
-    if (pinHoverTarget) {
-      const pixel = grid.charToPixel(pinHoverTarget.point.x, pinHoverTarget.point.y);
-      const cx = pixel.x + offsetX;
-      const cy = pixel.y + offsetY;
-
-      const pinColor = pinHoverTarget.hasExistingPin ? accent : accentSecondary;
-
-      // Filled circle background for visibility
-      ctx.fillStyle = '#1a1a1a';
-      ctx.beginPath();
-      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Pin circle
-      ctx.strokeStyle = pinColor;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-      ctx.stroke();
+    // Pin indicator on top with center dot for visibility over wire path
+    if (pinHover) {
+      const color = pinHover.hasExistingPin ? accent : accentSecondary;
+      overlay.drawConnectionRing(pinHover.point.x, pinHover.point.y, {
+        color, withCenterDot: true
+      });
     }
   }
 };

@@ -58,7 +58,7 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
     this.currentPos = null;
     this.hFirst = true;
     // Keep style persistent across activations
-    context.canvas.style.cursor = this.cursor;
+    context.setCursor(this.cursor);
   }
 
   deactivate() {
@@ -118,7 +118,6 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
       }
 
       // Check if clicked point hits an existing line - auto-finish for connection
-      // (Merging is handled as post-process in recomputeJunctions)
       const state = context.history.getState();
       const page = state.project.pages.find(p => p.id === state.activePageId);
       if (page) {
@@ -265,131 +264,50 @@ AsciiEditor.tools.LineTool = class LineTool extends AsciiEditor.tools.Tool {
     return this.lineUtils.simplifyPoints(points);
   }
 
-  /**
-   * Draw line segments using ASCII characters
-   * Delegates to shared lineUtils
-   */
-  drawLineSegments(ctx, points, chars, grid, color) {
-    const bgStyles = getComputedStyle(document.documentElement);
-    const bgCanvas = bgStyles.getPropertyValue('--bg-canvas').trim() || '#1a1a1a';
-    this.lineUtils.drawSegments(ctx, points, chars, grid, color, bgCanvas);
-  }
 
-  renderOverlay(ctx, context) {
-    const styles = getComputedStyle(document.documentElement);
-    const accent = styles.getPropertyValue('--accent').trim() || '#007acc';
-    const accentSecondary = styles.getPropertyValue('--accent-secondary').trim() || '#00aa66';
-    const textColor = styles.getPropertyValue('--text-canvas').trim() || '#cccccc';
-
-    const grid = context.grid;
-    const offsetX = grid.charWidth / 2;
-    const offsetY = grid.charHeight / 2;
-
-    // Get page objects for hover detection
+  renderOverlay(overlay, context) {
     const state = context.history.getState();
     const page = state.project.pages.find(p => p.id === state.activePageId);
     const objects = page ? page.objects : [];
 
-    // Detect hover targets - show connection indicator (even before drawing)
-    let hoverTarget = null;
+    // Hover-on-existing-line connection hint
+    let hover = null;
     if (this.currentPos) {
       const lineHits = AsciiEditor.core.findLinesAtPoint(this.currentPos, objects);
-      if (lineHits.length > 0) {
-        hoverTarget = { point: this.currentPos };
-      }
+      if (lineHits.length > 0) hover = this.currentPos;
+    }
+    if (hover) {
+      overlay.drawConnectionRing(hover.x, hover.y, { label: 'CONNECT' });
     }
 
-    // Draw connection indicator
-    if (hoverTarget) {
-      const pixel = grid.charToPixel(hoverTarget.point.x, hoverTarget.point.y);
-      const cx = pixel.x + offsetX;
-      const cy = pixel.y + offsetY;
-
-      // Connection indicator: glowing ring
-      ctx.strokeStyle = accentSecondary;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Inner glow
-      ctx.strokeStyle = 'rgba(0, 170, 102, 0.4)';
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Label
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = accentSecondary;
-      ctx.fillText('CONNECT', cx + 12, cy - 8);
-    }
-
-    // Draw crosshair cursor when hovering (before starting to draw)
     if (!this.drawing && this.currentPos) {
-      const pixel = grid.charToPixel(this.currentPos.x, this.currentPos.y);
-      const cx = pixel.x + offsetX;
-      const cy = pixel.y + offsetY;
-
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = 1;
-
-      // Vertical line
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - 8);
-      ctx.lineTo(cx, cy + 8);
-      ctx.stroke();
-
-      // Horizontal line
-      ctx.beginPath();
-      ctx.moveTo(cx - 8, cy);
-      ctx.lineTo(cx + 8, cy);
-      ctx.stroke();
+      overlay.drawCrosshair(this.currentPos.x, this.currentPos.y);
     }
 
     if (this.points.length === 0 && !this.currentPos) return;
 
-    // Set up font for ASCII character rendering
-    ctx.font = '16px BerkeleyMono, monospace';
-    ctx.textBaseline = 'top';
-
-    const chars = this.currentStyle.chars;
-
-    // Build complete preview path: committed points + preview to cursor
-    let allPoints = [...this.points];
+    // Build full preview path
+    const allPoints = [...this.points];
     if (this.drawing && this.currentPos && this.points.length > 0) {
       const anchor = this.points[this.points.length - 1];
       const previewPath = this.getPreviewPath(anchor, this.currentPos);
-      // Add preview points (skip first since it's the anchor)
-      for (let i = 1; i < previewPath.length; i++) {
-        allPoints.push(previewPath[i]);
-      }
+      for (let i = 1; i < previewPath.length; i++) allPoints.push(previewPath[i]);
     }
 
-    // Draw ASCII characters for the entire path
     if (allPoints.length >= 2) {
-      this.drawLineSegments(ctx, allPoints, chars, grid, textColor);
+      overlay.drawAsciiPath(allPoints, this.currentStyle.chars);
     }
 
-    // Draw point markers for committed points (small circles)
-    ctx.fillStyle = accent;
+    // Committed point markers
+    for (const p of this.points) overlay.drawDot(p.x, p.y);
 
-    for (let i = 0; i < this.points.length; i++) {
-      const pixel = grid.charToPixel(this.points[i].x, this.points[i].y);
-      ctx.beginPath();
-      ctx.arc(pixel.x + offsetX, pixel.y + offsetY, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Status indicator: point count, posture, and style
+    // Status indicator
     if (this.points.length > 0) {
-      ctx.font = '11px sans-serif';
-      ctx.fillStyle = accent;
-      const lastPoint = this.points[this.points.length - 1];
-      const labelPixel = grid.charToPixel(lastPoint.x, lastPoint.y);
-      const postureLabel = this.hFirst ? 'H-V' : 'V-H';
+      const last = this.points[this.points.length - 1];
+      const posture = this.hFirst ? 'H-V' : 'V-H';
       const styleInfo = `${this.currentStyle.hotkey}:${this.currentStyle.label}`;
-      ctx.fillText(`${this.points.length}pts ${postureLabel} [${styleInfo}]`, labelPixel.x + offsetX + 8, labelPixel.y + offsetY - 8);
+      overlay.drawStatusLabel(last.x, last.y,
+        `${this.points.length}pts ${posture} [${styleInfo}]`);
     }
   }
 };
